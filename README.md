@@ -69,6 +69,8 @@ firebase deploy --only hosting
 
 Pour France Travail, ajoute `FRANCE_TRAVAIL_CLIENT_ID` et `FRANCE_TRAVAIL_CLIENT_SECRET` de la même façon.
 
+La page `/stats` (comptes et candidatures créés par jour et par semaine) n'est ouverte qu'aux e-mails de `ADMIN_EMAILS` (séparés par des virgules), à ajouter dans `--set-env-vars`.
+
 ## Tests
 
 ```bash

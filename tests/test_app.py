@@ -1,12 +1,13 @@
 import asyncio
 import io
 import json
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app import jobs, llm, main, store, websearch
+from app import jobs, llm, main, stats, store, websearch
 
 
 @pytest.fixture
@@ -185,3 +186,27 @@ def test_fetch_page_refuses_local_addresses():
     for url in ("http://localhost:8000/", "http://127.0.0.1/", "http://192.168.1.1/", "file:///etc/passwd"):
         with pytest.raises(websearch.WebSearchError):
             asyncio.run(websearch.fetch_page(url))
+
+
+def test_stats_evolution():
+    result = stats.evolution(["2026-11-16T10:00:00+00:00", "2026-11-18T08:00:00+00:00"],
+                             ["2026-11-15T17:00:00+00:00", "2026-11-18T09:00:00+00:00", "2026-11-18T10:00:00+00:00"],
+                             date(2026, 11, 18))
+    assert [r["period"] for r in result["daily"]] == ["2026-11-18", "2026-11-17", "2026-11-16", "2026-11-15"]
+    assert result["daily"][0] == {"period": "2026-11-18", "accounts": 1, "totalAccounts": 2,
+                                  "applications": 2, "totalApplications": 3}
+    assert result["daily"][1]["accounts"] == 0
+    assert result["weekly"] == [
+        {"period": "2026-11-16", "accounts": 2, "totalAccounts": 2, "applications": 2, "totalApplications": 3},
+        {"period": "2026-11-09", "accounts": 0, "totalAccounts": 0, "applications": 1, "totalApplications": 1},
+    ]
+
+
+def test_stats_admins_only(client, monkeypatch):
+    monkeypatch.setattr(store, "list_account_dates", lambda: [])
+    monkeypatch.setattr(store, "list_application_dates", lambda: [])
+    monkeypatch.setenv("ADMIN_EMAILS", "Admin@example.com, other@example.com")
+    main.app.dependency_overrides[main._claims] = lambda: {"sub": "u1", "email": "user@example.com"}
+    assert client.get("/api/stats").status_code == 403
+    main.app.dependency_overrides[main._claims] = lambda: {"sub": "u1", "email": "admin@example.com"}
+    assert client.get("/api/stats").json() == {"daily": [], "weekly": []}
