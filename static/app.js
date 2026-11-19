@@ -23,6 +23,7 @@ const ICONS = {
   file: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/>',
   fileCheck: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/><path d="M9 13l2 2 4-4"/>',
   mail: '<path d="M3 5h18v14H3z"/><path d="M3 6l9 7 9-7"/>',
+  link: '<path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1"/><path d="M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1"/>',
 };
 const GRIP = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="#9CA3AF">'
   + [6, 12, 18].map((y) => `<circle cx="9" cy="${y}" r="1.6"/><circle cx="15" cy="${y}" r="1.6"/>`).join("") + "</svg>";
@@ -104,10 +105,12 @@ async function loadApps() {
 
 function renderNav() {
   const offers = location.hash.startsWith("#/offers");
+  const agent = location.hash.startsWith("#/agent");
   const current = (on) => (on ? ' aria-current="page"' : "");
   document.getElementById("nav").innerHTML = userId ? `
-    <a href="#/"${current(!offers)}>${icon("inbox", 18)}<span class="grow">${t("nav.box")}</span><span class="count">${apps.length}</span></a>
+    <a href="#/"${current(!offers && !agent)}>${icon("inbox", 18)}<span class="grow">${t("nav.box")}</span><span class="count">${apps.length}</span></a>
     <a href="#/offers"${current(offers)}>${icon("search", 18)}<span>${t("nav.offers")}</span></a>
+    <a href="#/agent"${current(agent)}>${icon("link", 18)}<span>${t("nav.agent")}</span></a>
     <a href="#/signout">${icon("back", 18)}<span>${t("nav.signOut")}</span></a>` : "";
   document.getElementById("lang").innerHTML = Object.keys(LOCALES)
     .map((code) => `<button type="button" data-lang="${code}" aria-pressed="${code === lang}">${code.toUpperCase()}</button>`)
@@ -134,6 +137,7 @@ function route() {
     return authApi.signOut();
   }
   if (page === "offers") return showOfferSearch();
+  if (page === "agent") return showAgent();
   if (page === "new") return showNew();
   if (page === "a" && sub === "edit") return showEdit(id);
   if (page === "a") return showDetail(id);
@@ -846,6 +850,29 @@ async function deleteApplication() {
 
 const search = { params: { q: "", location: "", department: "", kind: "emploi" }, data: null, loading: false, error: "" };
 let found = [];
+
+// ---------- Lien MCP pour les agents ----------
+
+async function showAgent() {
+  view.className = "list";
+  rerender = showAgent;
+  view.innerHTML = `<h1>${t("nav.agent")}</h1>`;
+  try {
+    const { path } = await api("/api/mcp/link");
+    const tools = ["list_applications", "get_application", "create_application", "update_application"];
+    view.innerHTML += `<p>${t("agent.help")}</p>
+      <ul>${tools.map((name) => `<li><code>${name}</code> : ${t("agent." + name)}</li>`).join("")}</ul>
+      <p class="banner error" role="note"><strong>${t("agent.warning")}</strong></p>
+      <div class="actions"><button class="btn btn-primary" type="button" id="copy-link">${t("agent.copy")}</button></div>`;
+    view.onclick = async (e) => {
+      if (e.target.id !== "copy-link") return;
+      await navigator.clipboard.writeText(location.origin + path);
+      e.target.textContent = t("agent.copied");
+    };
+  } catch (err) {
+    view.innerHTML += `<p class="banner error" role="status">${esc(err.message)}</p>`;
+  }
+}
 
 function showOfferSearch() {
   view.className = "list";

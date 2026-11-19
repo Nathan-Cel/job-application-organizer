@@ -10,6 +10,7 @@ Application web pour suivre ses candidatures (emploi, stage, alternance). Chaque
 | **Candidature** | Page de lecture pensée pour répondre à un recruteur : points clés de l'offre d'abord (ou les échanges pour une candidature spontanée), puis l'offre, le CV, le contact, les échanges, la lettre. |
 | **Création / modification** | Deux types : à une offre ou spontanée. Seules les bases sont obligatoires ; les sections (lien de l'offre, points clés, CV, lettre, échange, contact, section libre) s'ajoutent, se retirent et se réordonnent. Un **échange** (nom, coordonnée et plateforme obligatoires) contient une suite de messages datés ; on peut en ajouter plusieurs. **« Fetch and summarize »** lit la page de l'offre et l'IA (**Groq**) remplit les points clés ; un champ inconnu reste vide. |
 | **Offer search** | Recherche d'offres sur le web et via l'API France Travail ; « Track » crée une candidature à partir d'une offre. |
+| **AI agent** | Lien MCP personnel à ajouter comme connecteur personnalisé dans Claude, ChatGPT ou Le Chat : l'agent consulte, crée et modifie les candidatures (pas de suppression ni de fichier PDF). |
 
 ## Installation
 
@@ -43,6 +44,10 @@ La configuration web du projet est dans `static/auth.js`. La connexion par e-mai
 1. Crée une clé sur https://console.groq.com/keys.
 2. Mets-la dans `.env` : `GROQ_API_KEY=...` (modèle modifiable via `GROQ_MODEL`).
 
+### Agents IA (MCP)
+
+Le lien de chaque utilisateur est son identifiant signé avec `MCP_SECRET` : il sert de mot de passe. Génère une valeur avec `python -c "import secrets; print(secrets.token_hex(32))"` et mets-la dans `.env` : `MCP_SECRET=...`. Changer ce secret invalide tous les liens.
+
 ### API France Travail (optionnelle, gratuite)
 
 Sans elle, Offer search cherche quand même sur le web. Crée une application sur https://francetravail.io, abonne-la à l'API **« Offres d'emploi v2 »** et copie ses identifiants dans `.env`.
@@ -61,13 +66,21 @@ printf %s "<clé Groq>" | gcloud secrets create groq-api-key --data-file=-
 gcloud secrets add-iam-policy-binding groq-api-key --role=roles/secretmanager.secretAccessor \
   --member=serviceAccount:263454823776-compute@developer.gserviceaccount.com
 
+# Secret des liens MCP (une seule fois)
+python -c "import secrets; print(secrets.token_hex(32), end='')" | gcloud secrets create mcp-secret --data-file=-
+gcloud secrets add-iam-policy-binding mcp-secret --role=roles/secretmanager.secretAccessor \
+  --member=serviceAccount:263454823776-compute@developer.gserviceaccount.com
+
 # À chaque mise à jour
 gcloud run deploy job-search-center --source . --region europe-west1 --allow-unauthenticated \
-  --set-env-vars FIREBASE_PROJECT_ID=helper-job-search-center --set-secrets GROQ_API_KEY=groq-api-key:latest
+  --set-env-vars FIREBASE_PROJECT_ID=helper-job-search-center \
+  --set-secrets GROQ_API_KEY=groq-api-key:latest,MCP_SECRET=mcp-secret:latest
 firebase deploy --only hosting
 ```
 
 Pour France Travail, ajoute `FRANCE_TRAVAIL_CLIENT_ID` et `FRANCE_TRAVAIL_CLIENT_SECRET` de la même façon.
+
+La page `/stats` (comptes et candidatures créés par jour et par semaine) n'est ouverte qu'aux e-mails de `ADMIN_EMAILS` (séparés par des virgules), à ajouter dans `--set-env-vars`.
 
 ## Tests
 
@@ -80,6 +93,7 @@ pytest
 ```
 app/
   main.py      # routes FastAPI (vérifie le jeton Firebase du cookie __session)
+  mcp_server.py # serveur MCP pour les agents IA, monté sur /mcp/<clé>/
   store.py     # Firestore : candidatures et fichiers
   offer.py     # lecture d'une offre + résumé en points clés par l'IA
   llm.py       # client Groq

@@ -5,6 +5,7 @@ import csv
 import io
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
@@ -20,7 +21,7 @@ from pydantic import BaseModel, ValidationError
 
 load_dotenv()
 
-from . import jobs, llm, offer, store, websearch  # noqa: E402  (après load_dotenv)
+from . import jobs, llm, offer, stats, store, websearch  # noqa: E402  (après load_dotenv)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 MAX_FILE_BYTES = 10_000_000
@@ -54,14 +55,36 @@ def index():
     return FileResponse(STATIC_DIR / "index.html")
 
 
-def current_user(session: str = Cookie("", alias="__session")) -> str:
+def _claims(session: str = Cookie("", alias="__session")) -> dict:
     """Vérifie le jeton Firebase du cookie __session (seul cookie transmis par Firebase Hosting)."""
     try:
-        claims = id_token.verify_firebase_token(session, google_requests.Request(),
-                                                audience=os.getenv("FIREBASE_PROJECT_ID"))
+        return id_token.verify_firebase_token(session, google_requests.Request(),
+                                              audience=os.getenv("FIREBASE_PROJECT_ID"))
     except ValueError as exc:
         raise HTTPException(status_code=401, detail="Please sign in.") from exc
+
+
+def current_user(claims: dict = Depends(_claims)) -> str:
     return claims["sub"]
+
+
+def admin_user(claims: dict = Depends(_claims)) -> None:
+    admins = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
+    if claims.get("email", "").lower() not in admins:
+        raise HTTPException(status_code=403, detail="Administrators only.")
+
+
+# ---------- Statistiques ----------
+
+@app.get("/stats")
+def stats_page():
+    return FileResponse(STATIC_DIR / "stats.html")
+
+
+@app.get("/api/stats", dependencies=[Depends(admin_user)])
+def get_stats():
+    return stats.evolution(store.list_account_dates(), store.list_application_dates(),
+                           datetime.now(timezone.utc).date())
 
 
 # ---------- Candidatures ----------
@@ -312,3 +335,15 @@ async def search_jobs(q: str = "", location: str = "", department: str = "", kin
 
     await asyncio.gather(from_france_travail(), from_web())
     return result
+
+
+# ---------- MCP (agents) ----------
+
+from . import mcp_server  # noqa: E402  (monte /mcp/{key} ; importé en dernier car il importe main)
+
+
+@app.get("/api/mcp/link")
+def mcp_link(uid: str = Depends(current_user)):
+    if not os.getenv("MCP_SECRET"):
+        raise HTTPException(status_code=503, detail="The MCP server is not configured.")
+    return {"path": f"/mcp/{mcp_server.key_for(uid)}/"}
