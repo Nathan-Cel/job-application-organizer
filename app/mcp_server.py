@@ -19,7 +19,7 @@ from fastmcp.server.dependencies import get_http_request
 from . import main
 
 SUMMARY_FIELDS = ("id", "type", "company", "jobTitle", "status", "lastStatusChangeAt", "sentAt")
-SINGLE_KINDS = main.SECTION_KINDS - {"custom"}  # une seule section de ces types par candidature
+SINGLE_KINDS = main.SECTION_KINDS - {"conversation", "custom"}  # une seule section de ces types par candidature
 SECTIONS_DOC = """
 Sections are objects with a "kind" and the fields of that kind (all text unless stated):
 - offerLink: url, rawText (full text of the job offer)
@@ -27,7 +27,10 @@ Sections are objects with a "kind" and the fields of that kind (all text unless 
   requirements (list of text), why (why the user chose this offer)
 - company: summary (what the company does), why (why the user chose this company)
 - letter: text (cover letter)
-- email: to, sentAt, subject, body (the application email)
+- conversation: name, handle (email, phone number, username…), platform (Outlook, LinkedIn, WhatsApp…),
+  messages (list of {"date": "YYYY-MM-DD", "text"}); name, handle and platform are required.
+  An application can have several conversations. To add a message, send the conversation's id
+  with its full messages list.
 - contact: name, position, email, phone, extra (list of {"label", "value"})
 - custom: title, content
 A spontaneous application cannot have offerLink or keyPoints. CV files (kind cv) can only be added in the web app.
@@ -87,7 +90,8 @@ def create_application(type: Literal["regular", "spontaneous"], company: str,
 
 
 @mcp.tool(description="""Modify a job application. Only the given values change.
-Each given section is merged into the existing section with the same id (or the same kind, except custom);
+Each given section is merged into the existing section with the same id (or the same kind, except conversation
+and custom);
 otherwise it is added. Sections cannot be removed here.""" + SECTIONS_DOC)
 def update_application(application_id: str, company: str | None = None, jobTitle: str | None = None,
                        status: Literal["notsent", "sent", "positive", "refused"] | None = None,

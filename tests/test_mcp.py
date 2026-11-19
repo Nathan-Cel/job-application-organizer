@@ -54,6 +54,11 @@ def test_update_merges(client):
     assert contact == {"id": "s2", "kind": "contact", "name": "Maya", "phone": "07"}
     assert custom["title"] == "Notes" and custom["id"]
 
+    conv = {"kind": "conversation", "name": "Maya", "handle": "maya@x.example", "platform": "Outlook", "messages": []}
+    _call(client, "update_application", application_id="a1", sections=[conv])
+    _, updated = _call(client, "update_application", application_id="a1", sections=[conv | {"platform": "LinkedIn"}])
+    assert [s["platform"] for s in updated["sections"] if s["kind"] == "conversation"] == ["Outlook", "LinkedIn"]
+
 
 def test_errors_reach_agent(client):
     _, result = _call(client, "create_application", type="spontaneous", company="Halden Labs", status="sent",
