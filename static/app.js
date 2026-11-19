@@ -766,8 +766,16 @@ async function showAgent() {
   view.innerHTML = `<h1>${t("nav.agent")}</h1>`;
   try {
     const { path } = await api("/api/mcp/link");
+    const tools = ["list_applications", "get_application", "create_application", "update_application"];
     view.innerHTML += `<p>${t("agent.help")}</p>
-      <input class="field" readonly value="${esc(location.origin + path)}" onfocus="this.select()">`;
+      <ul>${tools.map((name) => `<li><code>${name}</code> : ${t("agent." + name)}</li>`).join("")}</ul>
+      <p class="banner error" role="note"><strong>${t("agent.warning")}</strong></p>
+      <div class="actions"><button class="btn btn-primary" type="button" id="copy-link">${t("agent.copy")}</button></div>`;
+    view.onclick = async (e) => {
+      if (e.target.id !== "copy-link") return;
+      await navigator.clipboard.writeText(location.origin + path);
+      e.target.textContent = t("agent.copied");
+    };
   } catch (err) {
     view.innerHTML += `<p class="banner error" role="status">${esc(err.message)}</p>`;
   }
