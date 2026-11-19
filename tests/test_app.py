@@ -87,6 +87,51 @@ def test_application_validation(client):
     assert client.put(f"/api/applications/{app_id}", json=body).status_code == 400
 
 
+def test_conversation_needs_name_contact_platform(client):
+    conv = {"kind": "conversation", "name": "Maya", "handle": "maya@halden.example", "platform": "Outlook",
+            "messages": [{"date": "2026-11-04", "text": "Hello"}, {"date": "2026-11-06", "text": "Reply"}]}
+    assert _new(client, sections=[conv, conv]).status_code == 201
+    assert _new(client, sections=[conv | {"platform": " "}]).status_code == 400
+
+
+def test_old_email_section_becomes_conversation(client):
+    app_id = _new(client).json()["id"]
+    old = {"id": "s1", "kind": "email", "to": "hr@x.example", "sentAt": "Nov 4", "subject": "Hi", "body": "Text"}
+    main.store.update_application(app_id, {**main.store.get_application(app_id), "sections": [old]})
+    conv = client.get(f"/api/applications/{app_id}").json()["sections"][0]
+    assert conv == {"id": "s1", "kind": "conversation", "name": "", "handle": "hr@x.example", "platform": "E-mail",
+                    "messages": [{"date": "", "text": "Nov 4\n\nHi\n\nText"}]}
+
+
+def test_export_import_csv(client):
+    _new(client, sections=[{"kind": "offerLink", "url": "https://x.example/job"},
+                           {"kind": "contact", "name": "Maya", "email": "maya@x.example", "extra": []}])
+    exported = client.get("/api/export/csv")
+    assert exported.headers["content-type"].startswith("text/csv")
+    assert client.post("/api/import/csv", content=exported.content).json() == {"imported": 1}
+    copy = client.get("/api/applications").json()[1]
+    assert copy["company"] == "Halden Labs"
+    assert copy["sections"][0]["url"] == "https://x.example/job"
+    assert copy["sections"][1]["name"] == "Maya"
+
+    excel_fr = "company;status\nAéro;sent\n;\n".encode("cp1252")
+    assert client.post("/api/import/csv", content=excel_fr).json() == {"imported": 1}
+    resp = client.post("/api/import/csv", content=b"company,status\nX,unknown\n")
+    assert resp.status_code == 400 and resp.json()["detail"].startswith("Entry 1:")
+
+
+def test_export_import_json_keeps_dates_drops_files(client):
+    ref = client.post("/api/files", params={"name": "cv.pdf"}, content=_pdf()).json()
+    _new(client, status="sent", sections=[{"kind": "cv", "file": ref}])
+    exported = client.get("/api/export/json").json()
+    assert "uid" not in exported[0]
+    client.post("/api/import/json", json=exported)
+    copy = client.get("/api/applications").json()[1]
+    assert copy["sentAt"] == exported[0]["sentAt"]
+    assert copy["sections"] == [{"kind": "cv"}]
+    assert client.post("/api/import/json", content=b"{}").status_code == 400
+
+
 def test_pdf_upload_and_cleanup(client):
     ref = client.post("/api/files", params={"name": "CV été.pdf"}, content=_pdf()).json()
     assert ref["pages"] == 1

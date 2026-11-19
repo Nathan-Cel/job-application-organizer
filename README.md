@@ -6,9 +6,9 @@ Application web pour suivre ses candidatures (emploi, stage, alternance). Chaque
 
 | Page | Ce que ça fait |
 |---|---|
-| **Box** | Liste des candidatures, triée par date du dernier changement de statut, filtrable par statut (Not sent, Sent, Positive response, Refused). |
-| **Candidature** | Page de lecture pensée pour répondre à un recruteur : points clés de l'offre d'abord (ou l'e-mail envoyé pour une candidature spontanée), puis l'offre, le CV, le contact, l'e-mail, la lettre. |
-| **Création / modification** | Deux types : à une offre ou spontanée. Seules les bases sont obligatoires ; les sections (lien de l'offre, points clés, CV, lettre, e-mail, contact, section libre) s'ajoutent, se retirent et se réordonnent. **« Fetch and summarize »** lit la page de l'offre et l'IA (**Groq**) remplit les points clés ; un champ inconnu reste vide. |
+| **Box** | Liste des candidatures, par date du dernier changement de statut ou regroupées par entreprise (bandeaux repliables), filtrable par statut (Not sent, Sent, Positive response, Refused). **Import / export** : CSV (champs de base, colonnes `company, jobTitle, type, status, offerUrl, contactName, contactPosition, contactEmail, contactPhone`, séparateur `,` ou `;`) ou JSON (tout sauf les PDF, sert de sauvegarde). |
+| **Candidature** | Page de lecture pensée pour répondre à un recruteur : points clés de l'offre d'abord (ou les échanges pour une candidature spontanée), puis l'offre, le CV, le contact, les échanges, la lettre. |
+| **Création / modification** | Deux types : à une offre ou spontanée. Seules les bases sont obligatoires ; les sections (lien de l'offre, points clés, CV, lettre, échange, contact, section libre) s'ajoutent, se retirent et se réordonnent. Un **échange** (nom, coordonnée et plateforme obligatoires) contient une suite de messages datés ; on peut en ajouter plusieurs. **« Fetch and summarize »** lit la page de l'offre et l'IA (**Groq**) remplit les points clés ; un champ inconnu reste vide. |
 | **Offer search** | Recherche d'offres sur le web et via l'API France Travail ; « Track » crée une candidature à partir d'une offre. |
 
 ## Installation
