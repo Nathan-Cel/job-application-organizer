@@ -212,3 +212,15 @@ async def search_jobs(q: str = "", location: str = "", department: str = "", kin
 
     await asyncio.gather(from_france_travail(), from_web())
     return result
+
+
+# ---------- MCP (agents) ----------
+
+from . import mcp_server  # noqa: E402  (monte /mcp/{key} ; importé en dernier car il importe main)
+
+
+@app.get("/api/mcp/link")
+def mcp_link(uid: str = Depends(current_user)):
+    if not os.getenv("MCP_SECRET"):
+        raise HTTPException(status_code=503, detail="The MCP server is not configured.")
+    return {"path": f"/mcp/{mcp_server.key_for(uid)}/"}
