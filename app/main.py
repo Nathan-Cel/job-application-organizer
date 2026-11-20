@@ -346,4 +346,4 @@ from . import mcp_server  # noqa: E402  (monte /mcp/{key} ; importé en dernier 
 def mcp_link(uid: str = Depends(current_user)):
     if not os.getenv("MCP_SECRET"):
         raise HTTPException(status_code=503, detail="The MCP server is not configured.")
-    return {"path": f"/mcp/{mcp_server.key_for(uid)}/"}
+    return {"path": f"/mcp/{mcp_server.key_for(uid)}"}

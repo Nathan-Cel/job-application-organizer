@@ -7,6 +7,7 @@ Le lien sert de mot de passe, il ne faut pas le partager.
 import hashlib
 import hmac
 import os
+import re
 import secrets
 from typing import Literal
 
@@ -122,5 +123,19 @@ async def endpoint(scope, receive, send):
     await http_app(scope, receive, send)
 
 
+class TrailingSlash:
+    """Accepte /mcp/<clé> sans « / » final. Sinon Starlette redirige, et derrière Cloud Run
+    la redirection pointe vers une adresse http:// que les agents (claude.ai…) ne suivent pas."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and re.fullmatch(r"/mcp/[^/]+", scope["path"]):
+            scope = {**scope, "path": scope["path"] + "/"}
+        await self.app(scope, receive, send)
+
+
 main.app.router.lifespan_context = http_app.lifespan
 main.app.mount("/mcp/{key}", endpoint)
+main.app.add_middleware(TrailingSlash)

@@ -13,7 +13,7 @@ def secret(monkeypatch):
 
 def _call(client, tool, path=None, **arguments):
     """Appelle un outil MCP comme le ferait un agent ; renvoie (statut HTTP, résultat)."""
-    path = path or f"/mcp/{mcp_server.key_for('u1')}/"
+    path = path or f"/mcp/{mcp_server.key_for('u1')}"
     resp = client.post(path, headers={"Accept": "application/json, text/event-stream"},
                        json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                              "params": {"name": tool, "arguments": arguments}})
@@ -24,7 +24,15 @@ def _call(client, tool, path=None, **arguments):
 
 
 def test_link(client):
-    assert client.get("/api/mcp/link").json()["path"] == f"/mcp/{mcp_server.key_for('u1')}/"
+    assert client.get("/api/mcp/link").json()["path"] == f"/mcp/{mcp_server.key_for('u1')}"
+
+
+def test_link_without_redirect(client):
+    """claude.ai appelle le lien sans « / » final et ne suit pas la redirection de Starlette."""
+    for path in (f"/mcp/{mcp_server.key_for('u1')}", f"/mcp/{mcp_server.key_for('u1')}/"):
+        resp = client.post(path, headers={"Accept": "application/json, text/event-stream"}, follow_redirects=False,
+                           json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        assert resp.status_code == 200
 
 
 def test_invalid_link_refused(client):
