@@ -73,14 +73,14 @@ gcloud secrets add-iam-policy-binding mcp-secret --role=roles/secretmanager.secr
 
 # À chaque mise à jour
 gcloud run deploy job-search-center --source . --region europe-west1 --allow-unauthenticated \
-  --set-env-vars FIREBASE_PROJECT_ID=helper-job-search-center \
+  --set-env-vars FIREBASE_PROJECT_ID=helper-job-search-center,ADMIN_EMAILS=nathan.celerier@aivancity.education \
   --set-secrets GROQ_API_KEY=groq-api-key:latest,MCP_SECRET=mcp-secret:latest
 firebase deploy --only hosting
 ```
 
 Pour France Travail, ajoute `FRANCE_TRAVAIL_CLIENT_ID` et `FRANCE_TRAVAIL_CLIENT_SECRET` de la même façon.
 
-La page `/stats` (comptes et candidatures créés par jour et par semaine) n'est ouverte qu'aux e-mails de `ADMIN_EMAILS` (séparés par des virgules), à ajouter dans `--set-env-vars`.
+La page `/stats` (comptes et candidatures créés par jour et par semaine) n'est ouverte qu'aux e-mails de `ADMIN_EMAILS` : garde-le dans `--set-env-vars`, qui remplace toutes les variables du service à chaque déploiement.
 
 ## Tests
 
