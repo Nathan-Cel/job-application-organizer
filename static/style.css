@@ -138,6 +138,14 @@ main.list { padding: 32px 40px; }
 .card.contact { flex: 1 1 260px; }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--subtle); }
 .card-head .meta { font-size: 12px; }
+.head-tools { display: flex; align-items: center; gap: 8px; }
+.card-head .icon-btn { width: 32px; height: 32px; margin: -6px -10px -6px 0; color: inherit; }
+.card.key .card-head .icon-btn:hover { background: rgba(255, 255, 255, 0.15); color: inherit; }
+.card.overlaid {
+  position: fixed; z-index: 30; top: 4vh; left: 50%; transform: translateX(-50%);
+  width: min(960px, calc(100vw - 32px)); max-height: 92vh; overflow-y: auto; background: #FFFFFF; box-shadow: var(--shadow);
+}
+.backdrop { position: fixed; inset: 0; z-index: 29; background: rgba(17, 24, 39, 0.45); }
 .card-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
 .card.key { flex: none; border-color: var(--green); }
 .card.key .card-head { padding: 12px 24px; border: 0; background: var(--green); color: #FFFFFF; }
@@ -153,8 +161,9 @@ main.list { padding: 32px 40px; }
 .key-lists ul { padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 15px; line-height: 1.4; }
 .prose { display: flex; flex-direction: column; gap: 10px; font-size: 14px; line-height: 1.55; color: #1F2937; white-space: pre-line; }
 .prose.big { gap: 12px; max-width: 760px; font-size: 15px; line-height: 1.6; }
-.prose .more { color: var(--disabled); }
 .scroll { max-height: 300px; overflow-y: auto; }
+.card:not(.overlaid) .clamp { max-height: 240px; overflow: hidden; }
+.card:not(.overlaid) .clamp.cut { mask-image: linear-gradient(to bottom, #000 70%, transparent); }
 .mail-meta { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
 .mail-meta.inline { flex-direction: row; flex-wrap: wrap; gap: 8px 40px; }
 .mail-meta span { color: var(--text); }

@@ -32,7 +32,7 @@ def test_posthog_forwarding(client, monkeypatch):  # noqa: F811
 
 def test_stats_reserved_to_admins(client, monkeypatch):  # noqa: F811
     assert client.get("/api/stats").status_code == 403
-    monkeypatch.setenv("ADMIN_UIDS", "someone, u1")
+    monkeypatch.setenv("ADMIN_EMAILS", "someone@example.com, U1@example.com")
     _new(client)
     data = client.get("/api/stats", params={"days": 7}).json()
     assert data["totals"]["users"] == 1 and data["totals"]["activeToday"] == 1

@@ -21,7 +21,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 DEMO_UID = "demo-user"
-os.environ["ADMIN_UIDS"] = DEMO_UID
+DEMO_EMAIL = "demo@example.com"
+os.environ["ADMIN_EMAILS"] = DEMO_EMAIL
 
 from app import main, store  # noqa: E402
 
@@ -76,7 +77,7 @@ if __name__ == "__main__":
     if os.getenv("K_SERVICE"):  # variable définie par Cloud Run
         sys.exit("Le mode démo ne doit pas tourner en production.")
     use_memory_store()
-    main.app.dependency_overrides[main.current_user] = lambda: DEMO_UID
+    main.app.dependency_overrides[main._claims] = lambda: {"sub": DEMO_UID, "email": DEMO_EMAIL}
     main.app.router.routes.insert(0, Route("/static/auth.js", auth_stub))
     if not os.getenv("GROQ_API_KEY"):
         print("Attention : GROQ_API_KEY manque dans .env, les fonctions IA ne marcheront pas.")

@@ -110,14 +110,22 @@ def index():
     return FileResponse(STATIC_DIR / "index.html")
 
 
-def current_user(session: str = Cookie("", alias="__session")) -> str:
+def _claims(session: str = Cookie("", alias="__session")) -> dict:
     """Vérifie le jeton Firebase du cookie __session (seul cookie transmis par Firebase Hosting)."""
     try:
-        claims = id_token.verify_firebase_token(session, google_requests.Request(),
-                                                audience=os.getenv("FIREBASE_PROJECT_ID"))
+        return id_token.verify_firebase_token(session, google_requests.Request(),
+                                              audience=os.getenv("FIREBASE_PROJECT_ID"))
     except ValueError as exc:
         raise HTTPException(status_code=401, detail="Please sign in.") from exc
+
+
+def current_user(claims: dict = Depends(_claims)) -> str:
     return claims["sub"]
+
+
+def is_admin(claims: dict = Depends(_claims)) -> bool:
+    admins = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
+    return claims.get("email", "").lower() in admins
 
 
 def _ai_error(uid: str, event: str, started: float, exc: Exception) -> None:
@@ -131,10 +139,10 @@ def _ms(started: float) -> int:
 # ---------- Compte et profil ----------
 
 @app.get("/api/me")
-def me(uid: str = Depends(current_user)):
+def me(uid: str = Depends(current_user), admin: bool = Depends(is_admin)):
     profile = store.get_profile(uid)
     return {
-        "uid": uid, "admin": uid in analytics.admin_uids(),
+        "uid": uid, "admin": admin,
         "profileFilled": bool((profile.get("cv") or "").strip() or (profile.get("skills") or "").strip()),
         "llm": llm.is_configured(),
     }
@@ -519,7 +527,7 @@ def collect_events(data: EventsIn, uid: str = Depends(current_user)):
 
 
 @app.get("/api/stats")
-def usage_stats(days: int = 30, uid: str = Depends(current_user)):
-    if uid not in analytics.admin_uids():
+def usage_stats(days: int = 30, admin: bool = Depends(is_admin)):
+    if not admin:
         raise HTTPException(status_code=403, detail="Statistics are reserved for administrators.")
     return analytics.stats(days)

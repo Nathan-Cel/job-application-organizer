@@ -11,10 +11,10 @@ Application web pour suivre ses candidatures (emploi, stage, alternance). Chaque
 | **Création / modification** | Deux types : à une offre ou spontanée. Seules les bases sont obligatoires ; les sections (lien de l'offre, points clés, CV, lettre, e-mail, contact, section libre) s'ajoutent, se retirent et se réordonnent. **« Fetch and summarize »** lit la page de l'offre et l'IA (**Groq**) remplit les points clés ; un champ inconnu reste vide. |
 | **Offer search** | Recherche d'offres sur le web et via l'API France Travail ; « Track » crée une candidature à partir d'une offre. |
 | **Find companies** | Candidatures spontanées, là où il y a moins de concurrence : l'utilisateur indique ce qu'il cherche, un lieu et un rayon (jusqu'à 50 km). L'IA choisit les secteurs d'activité (codes NAF, vérifiés dans la nomenclature officielle de l'INSEE) et l'**API publique « Recherche d'entreprises »** liste les entreprises actives du périmètre, triées par pertinence du secteur puis distance, filtrables par taille. Pour une entreprise : recherche de son site et des **adresses e-mail publiées** (recrutement@, contact@…, jamais devinées), rédaction d'un e-mail de candidature spontanée, ouverture dans la messagerie de l'utilisateur (qui l'envoie lui-même) et ajout à la Box. |
-| **Suggestions de l'IA** | Dans la section Lettre du formulaire, « Suggérer avec l'IA » rédige la lettre à partir de l'offre et du profil. Sur la page d'une candidature, « Répondre au recruteur » propose une réponse au message collé. |
+| **Suggestion de lettre** | Dans la section Lettre du formulaire, « Suggérer avec l'IA » rédige la lettre à partir de l'offre et du profil. |
 | **Préparation d'entretien** | Sur la page d'une candidature, sous les points clés, dans un encadré repliable : recherches web sur l'entreprise, puis fiche avec la situation, l'entreprise (sourcée), une **analyse détaillée de chaque compétence demandée** face au CV envoyé (ou à celui du profil), un pitch, les questions probables et à poser, une checklist. |
 | **Profile** | Objectif, compétences et CV (import du texte depuis un PDF), utilisés par l'IA ; langue (EN / FR) et déconnexion. |
-| **Statistics** | Réservée aux administrateurs (`ADMIN_UIDS`) : utilisateurs actifs par jour, entonnoir d'utilisation, usage et durée des fonctions IA, pages vues, dernières erreurs. |
+| **Statistics** | Réservée aux administrateurs (`ADMIN_EMAILS`) : utilisateurs actifs par jour, entonnoir d'utilisation, usage et durée des fonctions IA, pages vues, dernières erreurs. |
 
 ## Installation
 
@@ -79,7 +79,7 @@ Sans elle, Offer search cherche quand même sur le web. Crée une application su
 
 L'appli enregistre des événements (pages vues, candidature créée, offre résumée, réponse analysée, préparation générée, erreurs, durées des appels IA) dans la collection Firestore `events`, sans jamais de contenu (CV, offres, messages) ni information personnelle.
 
-- **Page Statistics** : mets ton identifiant (affiché en bas de ta page Profile) dans `ADMIN_UIDS` (plusieurs identifiants séparés par des virgules).
+- **Page Statistics** : mets l'adresse e-mail de ton compte dans `ADMIN_EMAILS` (plusieurs adresses séparées par des virgules) ; le lien n'apparaît que pour ces comptes et le serveur refuse les autres.
 - **PostHog (optionnel)** : crée un projet sur https://posthog.com (hébergement UE conseillé), puis renseigne `POSTHOG_API_KEY` (et `POSTHOG_HOST` si besoin). Les mêmes événements y sont envoyés par le serveur ; tu profites alors de ses tableaux de bord, entonnoirs et cohortes.
 
 ## Déploiement (Cloud Run + Firebase Hosting)
@@ -102,7 +102,7 @@ gcloud run deploy job-search-center --source . --region europe-west1 --allow-una
 firebase deploy --only hosting
 ```
 
-Pour France Travail, ajoute `FRANCE_TRAVAIL_CLIENT_ID` et `FRANCE_TRAVAIL_CLIENT_SECRET` de la même façon. Pour les statistiques, ajoute `ADMIN_UIDS=<ton uid>` à `--set-env-vars`, et la clé PostHog en secret si tu l'utilises (`--set-secrets POSTHOG_API_KEY=posthog-api-key:latest`).
+Pour France Travail, ajoute `FRANCE_TRAVAIL_CLIENT_ID` et `FRANCE_TRAVAIL_CLIENT_SECRET` de la même façon. Pour les statistiques, ajoute `ADMIN_EMAILS=<ton e-mail>` à `--set-env-vars`, et la clé PostHog en secret si tu l'utilises (`--set-secrets POSTHOG_API_KEY=posthog-api-key:latest`).
 
 ## Tests
 

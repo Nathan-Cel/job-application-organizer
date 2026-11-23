@@ -43,7 +43,7 @@ def client(monkeypatch):
         monkeypatch.setattr(store, name, fn)
     monkeypatch.delenv("FRANCE_TRAVAIL_CLIENT_ID", raising=False)
     monkeypatch.delenv("FRANCE_TRAVAIL_CLIENT_SECRET", raising=False)
-    main.app.dependency_overrides[main.current_user] = lambda: "u1"
+    main.app.dependency_overrides[main._claims] = lambda: {"sub": "u1", "email": "u1@example.com"}
     with TestClient(main.app) as c:
         c.files, c.apps, c.profiles, c.events = files, apps, profiles, events
         yield c

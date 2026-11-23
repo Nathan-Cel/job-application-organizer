@@ -1,4 +1,4 @@
-// Fonctions IA : préparation d'entretien, suggestions de lettre et de réponse au recruteur, et profil.
+// Fonctions IA : préparation d'entretien, suggestion de lettre, et profil.
 
 // ---------- Rendu Markdown minimal (titres, listes, tableaux, citations, gras, liens) ----------
 
@@ -40,18 +40,6 @@ function renderMarkdown(text) {
   return `<div class="md">${html}</div>`;
 }
 
-function outputBlock(text) {
-  return `<div class="output">${renderMarkdown(text)}</div>
-    <div class="actions"><button class="btn" type="button" data-copy>${t("common.copy")}</button></div>`;
-}
-
-function copyOnClick(e, text) {
-  const btn = e.target.closest("[data-copy]");
-  if (!btn) return false;
-  navigator.clipboard.writeText(text).then(() => (btn.textContent = t("common.copied")));
-  return true;
-}
-
 // ---------- Prochaine étape (Box et page candidature) ----------
 
 function nextStepLabel(n) {
@@ -80,13 +68,15 @@ function prepCard(app, prep, open) {
   if (prep.loading) {
     body = `<div class="banner loading" role="status"><span>${t("prep.loading")}</span><div class="progress"></div></div>`;
   } else if (p) {
-    body = `<p class="meta">${t("prep.generatedOn", { date: fmtDate(p.at) })}</p>${renderMarkdown(p.text)}
+    body = `<p class="meta">${t("prep.generatedOn", { date: fmtDate(p.at) })}</p><div class="clamp">${renderMarkdown(p.text)}</div>
       <div class="actions">${button}<button class="btn" type="button" data-copy-prep>${t("common.copy")}</button></div>`;
   } else {
     body = `<p class="help">${t("prep.help")}</p><div class="actions">${button}</div>`;
   }
   const error = prep.error ? `<p class="banner error" role="status">${esc(prep.error)}</p>` : "";
-  return `<details class="card prep" id="prep" ${open ? "open" : ""}><summary class="card-head"><h2>${t("prep.title")}</h2>${icon("chevron", 16, 'stroke="currentColor" stroke-width="2"')}</summary>
+  const over = overlaid === "prep";
+  return `<details class="card prep${over ? " overlaid" : ""}" id="prep" ${open || over ? "open" : ""}><summary class="card-head"><h2>${t("prep.title")}</h2>
+    <div class="head-tools">${expandButton("prep")}${icon("chevron", 16, 'stroke="currentColor" stroke-width="2"')}</div></summary>
     <div class="card-body">${error}${body}</div></details>`;
 }
 
@@ -118,33 +108,10 @@ function repliesCard(app) {
       <details><summary class="link">${t("reply.fullMessage")}</summary><div class="prose">${paras(r.message || "")}</div></details>
     </li>`;
   }).join("");
-  return card(t("reply.history"), `<ul class="reply-list">${items}</ul>`);
+  return card(t("reply.history"), `<ul class="reply-list">${items}</ul>`, { key: "replies" });
 }
 
-// ---------- Suggestions de l'IA : réponse au recruteur et lettre ----------
-
-function replyCard(reply) {
-  const busy = reply.loading ? "disabled" : "";
-  return card(t("suggest.replyTitle"), `
-    ${input("message", t("suggest.received"), { value: reply.message, ph: t("suggest.receivedPh"), area: 6, attrs: `data-reply ${busy}` })}
-    <div class="actions"><button class="btn btn-primary" type="button" data-suggest-reply ${busy}>${icon("spark")}${t("suggest.reply")}</button></div>
-    ${reply.loading ? `<div class="banner loading" role="status"><span>${t("suggest.loading")}</span><div class="progress"></div></div>` : ""}
-    ${reply.error ? `<p class="banner error" role="status">${esc(reply.error)}</p>` : ""}
-    ${reply.text ? outputBlock(reply.text) : ""}`, { cls: "wide" });
-}
-
-async function suggestReply(app, reply, redraw) {
-  Object.assign(reply, { loading: true, error: "" });
-  redraw();
-  try {
-    const extra = [app.jobTitle, app.company].filter(Boolean).join(" — ");
-    reply.text = (await api("/api/write", { method: "POST", body: { kind: "email", goal: "reply", received: reply.message, extra, lang } })).text;
-  } catch (err) {
-    reply.error = err.message;
-  }
-  reply.loading = false;
-  redraw();
-}
+// ---------- Suggestion de lettre ----------
 
 // Offre envoyée à l'IA : le texte complet s'il est là, sinon le poste et les points clés.
 function offerText(f) {
@@ -193,6 +160,7 @@ function renderProfile() {
   view.innerHTML = `<form class="narrow" id="profile-form">
     <header class="stack"><h1>${t("nav.profile")}</h1><p class="lead">${t("profile.lead")}</p></header>
     <section class="mod"><div class="mod-head"><h2>${t("profile.about")}</h2></div><div class="mod-body">
+      <p class="help">${t("profile.aboutHelp")}</p>
       <div class="fields">
         ${input("name", t("form.name"), { value: d.name })}
         ${input("target", t("profile.target"), { value: d.target, ph: t("profile.targetPh") })}
@@ -206,18 +174,15 @@ function renderProfile() {
         <button class="btn" type="button" data-action="choose" ${p.importing ? "disabled" : ""}>${t("form.chooseFile")}</button></div>
       ${input("cv", t("profile.cvText"), { value: d.cv, ph: t("profile.cvPh"), area: 12 })}
     </div></section>
-    <section class="mod"><div class="mod-head"><h2>${t("profile.account")}</h2></div><div class="mod-body">
-      <div class="fields">
-        <label class="lbl"><span>${t("profile.language")}</span><select class="field" data-lang-select>
-          ${Object.keys(LOCALES).map((code) => `<option value="${code}" ${code === lang ? "selected" : ""}>${t("lang." + code)}</option>`).join("")}
-        </select></label>
-      </div>
-      <div><a class="btn" href="#/signout">${t("nav.signOut")}</a></div>
-      <p class="meta">${t("profile.uid", { uid: esc(me?.uid || "") })}</p>
+    <section class="mod"><div class="mod-head"><h2>${t("profile.language")}</h2></div><div class="mod-body">
+      <div class="fields"><select class="field" data-lang-select aria-label="${t("profile.language")}">
+        ${Object.keys(LOCALES).map((code) => `<option value="${code}" ${code === lang ? "selected" : ""}>${t("lang." + code)}</option>`).join("")}
+      </select></div>
     </div></section>
     ${p.notice ? `<p class="banner success" role="status">${esc(p.notice)}</p>` : ""}
     ${p.error ? `<p class="banner error" role="status">${esc(p.error)}</p>` : ""}
-    <div class="form-foot"><div class="actions"><button class="btn btn-primary" type="submit" ${p.saving ? "disabled" : ""}>${t("profile.save")}</button></div></div>
+    <div class="form-foot"><div class="actions"><a class="btn" href="#/signout">${t("nav.signOut")}</a>
+      <button class="btn btn-primary" type="submit" ${p.saving ? "disabled" : ""}>${t("profile.save")}</button></div></div>
   </form>`;
   view.oninput = (e) => {
     if (e.target.dataset.key) d[e.target.dataset.key] = e.target.value;

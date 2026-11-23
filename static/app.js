@@ -23,6 +23,7 @@ const ICONS = {
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
   chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   building: '<path d="M4 21V5l8-3v19M12 21V9l8 3v9M2 21h20"/><path d="M7 8h2M7 12h2M7 16h2M15 14h2M15 17h2"/>',
+  expand: '<path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/>',
   spark: '<path d="M12 3v5M12 16v5M3 12h5M16 12h5M6 6l3 3M15 15l3 3M18 6l-3 3M9 15l-3 3"/>',
 };
 const GRIP = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="#9CA3AF">'
@@ -252,22 +253,20 @@ async function showDetail(id) {
     view.innerHTML = backLink("#/", t("back.box")) + `<div class="banner error" role="status">${esc(err.message)}</div>`;
     return;
   }
-  const expanded = { letter: false, prep: !app.prep }; // préparation repliée dès qu'elle existe
+  overlaid = "";
+  const expanded = { prep: !app.prep }; // préparation repliée dès qu'elle existe
   const prep = { loading: false, error: "" };
-  const reply = { message: app.replies?.[0]?.message || "", loading: false, error: "", text: "" };
-  rerender = () => renderDetail(app, expanded, prep, reply);
+  rerender = () => renderDetail(app, expanded, prep);
   rerender();
-  view.oninput = (e) => {
-    if (e.target.dataset.reply !== undefined) reply.message = e.target.value;
-  };
   view.onclick = async (e) => {
-    if (copyOnClick(e, reply.text)) return;
+    const expand = e.target.closest("[data-expand]");
+    if (expand) {
+      e.preventDefault(); // dans l'en-tête de la préparation, ne pas la replier
+      overlaid = overlaid === expand.dataset.expand ? "" : expand.dataset.expand;
+      return rerender();
+    }
     const summary = e.target.closest("#prep > summary");
     if (summary) expanded.prep = !summary.parentElement.open; // le clic précède l'ouverture native
-    if (e.target.closest("[data-expand-letter]")) {
-      expanded.letter = true;
-      rerender();
-    }
     if (e.target.closest("[data-prep]")) {
       expanded.prep = true;
       const updated = await runPrep(app, prep, rerender);
@@ -275,7 +274,6 @@ async function showDetail(id) {
       rerender();
     }
     if (e.target.closest("[data-copy-prep]")) navigator.clipboard.writeText(app.prep.text);
-    if (e.target.closest("[data-suggest-reply]")) suggestReply(app, reply, rerender);
   };
 }
 
@@ -283,8 +281,24 @@ function paras(text) {
   return text.split(/\n\s*\n/).map((p) => `<p>${esc(p.trim())}</p>`).join("");
 }
 
-function card(title, body, { cls = "", aside = "" } = {}) {
-  return `<section class="card ${cls}"><div class="card-head"><h2>${title}</h2>${aside}</div><div class="card-body">${body}</div></section>`;
+// Carte de la page candidature affichée par-dessus le reste (clé de la carte, ou "").
+let overlaid = "";
+
+addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && overlaid) {
+    overlaid = "";
+    rerender();
+  }
+});
+
+function expandButton(key) {
+  const open = overlaid === key;
+  return `<button class="icon-btn" type="button" data-expand="${key}" aria-label="${t(open ? "card.close" : "card.expand")}">${icon(open ? "close" : "expand", 16, 'stroke="currentColor" stroke-width="2"')}</button>`;
+}
+
+function card(title, body, { cls = "", aside = "", key = "" } = {}) {
+  const over = key && overlaid === key ? " overlaid" : "";
+  return `<section class="card ${cls}${over}"><div class="card-head"><h2>${title}</h2><div class="head-tools">${aside}${key ? expandButton(key) : ""}</div></div><div class="card-body">${body}</div></section>`;
 }
 
 function kv(key, value) {
@@ -299,7 +313,7 @@ function keyPointsCard(s) {
   if (!values && !lists) return "";
   return card(t("section.keyPoints"),
     (values ? `<div class="key-values">${values}</div>` : "") + (lists ? `<div class="key-lists">${lists}</div>` : ""),
-    { cls: "key" });
+    { cls: "key", key: "keyPoints" });
 }
 
 function whyBlock(text, labelKey) {
@@ -309,14 +323,14 @@ function whyBlock(text, labelKey) {
 function companyCard(s) {
   if (!s || !(s.summary || s.why)) return "";
   return card(t("section.company"),
-    (s.summary ? `<div class="prose">${paras(s.summary)}</div>` : "") + whyBlock(s.why, "key.whyCompany"));
+    (s.summary ? `<div class="prose clamp">${paras(s.summary)}</div>` : "") + whyBlock(s.why, "key.whyCompany"), { key: "company" });
 }
 
 function offerCard(s) {
   if (!s?.rawText && !s?.url) return "";
   const open = s.url ? `<a class="link" href="${esc(s.url)}" target="_blank" rel="noopener">${t("detail.openOriginal")}</a>` : "";
-  const body = s.rawText ? `<div class="prose scroll">${paras(s.rawText)}</div>` : `<a class="link" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url)}</a>`;
-  return card(t("detail.jobOffer"), body, { cls: "wide", aside: open });
+  const body = s.rawText ? `<div class="prose clamp">${paras(s.rawText)}</div>` : `<a class="link" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url)}</a>`;
+  return card(t("detail.jobOffer"), body, { cls: "wide", aside: open, key: "offer" });
 }
 
 function cvCard(s, app, cls) {
@@ -333,7 +347,7 @@ function cvCard(s, app, cls) {
           <a class="btn" href="${fileUrl(f, true)}">${t("file.download")}</a>
         </div>
       </div>
-    </div>`, { cls });
+    </div>`, { cls, key: "cv" });
 }
 
 function contactCard(s) {
@@ -345,30 +359,27 @@ function contactCard(s) {
   if (s.phone) parts.push(kv(t("contact.phone"), `<a class="link" href="tel:${esc(s.phone.replace(/\s/g, ""))}">${esc(s.phone)}</a>`));
   if (s.email) parts.push(kv(t("contact.email"), `<a class="link" href="mailto:${esc(s.email)}">${esc(s.email)}</a>`));
   for (const x of s.extra || []) if (x.value) parts.push(kv(esc(x.label), esc(x.value)));
-  return parts.length ? card(t("detail.contact"), parts.join(""), { cls: "contact" }) : "";
+  return parts.length ? card(t("detail.contact"), parts.join(""), { cls: "contact", key: "contact" }) : "";
 }
 
 function emailCard(s, main = false) {
   if (!s || !(s.to || s.subject || s.sentAt || s.body)) return "";
   const meta = [["to", s.to], ["subject", s.subject], ["sent", s.sentAt]]
     .filter(([, v]) => v).map(([k, v]) => `<div>${t("email." + k)}: <span>${esc(v)}</span></div>`).join("");
-  const body = s.body ? `${meta ? '<div class="rule"></div>' : ""}<div class="prose${main ? " big" : ""}">${paras(s.body)}</div>` : "";
-  return card(t("section.email"), `<div class="mail-meta${main ? " inline" : ""}">${meta}</div>${body}`, { cls: main ? "key" : "" });
+  const body = s.body ? `${meta ? '<div class="rule"></div>' : ""}<div class="prose clamp${main ? " big" : ""}">${paras(s.body)}</div>` : "";
+  return card(t("section.email"), `<div class="mail-meta${main ? " inline" : ""}">${meta}</div>${body}`, { cls: main ? "key" : "", key: "email" });
 }
 
-function letterCard(s, expanded) {
+function letterCard(s) {
   if (!s || !(s.file || s.text)) return "";
-  const paragraphs = (s.text || "").split(/\n\s*\n/);
-  const cut = !expanded && paragraphs.length > 2;
-  let body = s.text ? `<div class="prose">${paras(cut ? paragraphs.slice(0, 2).join("\n\n") : s.text)}${cut ? '<p class="more">…</p>' : ""}</div>` : "";
+  let body = s.text ? `<div class="prose clamp">${paras(s.text)}</div>` : "";
   if (s.file) body += `<div class="actions"><a class="btn" href="${fileUrl(s.file)}" target="_blank" rel="noopener">${t("detail.openLetter")}</a></div>`;
-  else if (cut) body += `<div class="actions"><button class="btn" type="button" data-expand-letter>${t("detail.openLetter")}</button></div>`;
-  return card(t("section.letter"), body, { aside: s.file ? `<span class="meta">${esc(s.file.name)}</span>` : "" });
+  return card(t("section.letter"), body, { aside: s.file ? `<span class="meta">${esc(s.file.name)}</span>` : "", key: "letter" });
 }
 
 function customCards(app) {
   return app.sections.filter((s) => s.kind === "custom" && (s.title || s.content))
-    .map((s) => card(esc(s.title || t("section.custom")), `<div class="prose">${paras(s.content)}</div>`)).join("");
+    .map((s, i) => card(esc(s.title || t("section.custom")), `<div class="prose clamp">${paras(s.content)}</div>`, { key: `custom${i}` })).join("");
 }
 
 function row(...cards) {
@@ -376,7 +387,7 @@ function row(...cards) {
   return html ? `<div class="cards">${html}</div>` : "";
 }
 
-function renderDetail(app, expanded, prep, reply) {
+function renderDetail(app, expanded, prep) {
   const regular = app.type === "regular";
   const dates = [t("detail.updated", { date: fmtDate(app.lastStatusChangeAt) })];
   if (app.sentAt) dates.push(t("detail.sent", { date: fmtDate(app.sentAt) }));
@@ -386,11 +397,11 @@ function renderDetail(app, expanded, prep, reply) {
        prepCard(app, prep, expanded.prep),
        row(companyCard(section(app, "company"))),
        row(offerCard(section(app, "offerLink")), cvCard(section(app, "cv"), app, "narrowish")),
-       row(...reference, emailCard(section(app, "email")), letterCard(section(app, "letter"), expanded.letter), customCards(app))]
+       row(...reference, emailCard(section(app, "email")), letterCard(section(app, "letter")), customCards(app))]
     : [emailCard(section(app, "email"), true),
        prepCard(app, prep, expanded.prep),
        row(companyCard(section(app, "company"))),
-       row(...reference, cvCard(section(app, "cv"), app), letterCard(section(app, "letter"), expanded.letter), customCards(app))];
+       row(...reference, cvCard(section(app, "cv"), app), letterCard(section(app, "letter")), customCards(app))];
 
   view.innerHTML = `
     ${backLink("#/", t("back.box"))}
@@ -410,8 +421,10 @@ function renderDetail(app, expanded, prep, reply) {
     </header>
     ${nextStepBanner(app)}
     ${blocks.filter(Boolean).join("")}
-    ${row(replyCard(reply))}
-    ${repliesCard(app)}`;
+    ${repliesCard(app)}
+    ${overlaid ? '<div class="backdrop" data-expand=""></div>' : ""}`;
+  // Fondu en bas des textes coupés : la carte agrandie les montre en entier.
+  for (const el of view.querySelectorAll(".clamp")) el.classList.toggle("cut", el.scrollHeight > el.clientHeight);
 }
 
 // ---------- Formulaire (création et modification) ----------

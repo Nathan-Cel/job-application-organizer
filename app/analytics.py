@@ -36,10 +36,6 @@ def now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def admin_uids() -> set[str]:
-    return {u.strip() for u in os.getenv("ADMIN_UIDS", "").split(",") if u.strip()}
-
-
 def clean_props(props: dict | None) -> dict:
     """Garde des propriétés courtes et simples : jamais de texte libre long."""
     clean = {}
