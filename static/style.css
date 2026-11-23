@@ -233,6 +233,10 @@ textarea.field { padding: 10px 12px; min-height: 96px; resize: vertical; line-he
 @media (max-width: 791px) {
   .layout { align-content: flex-start; }
 }
+/* Barre latérale à côté du contenu : toute la hauteur, fixe au défilement. */
+@media (min-width: 792px) {
+  .sidebar { position: sticky; top: 0; height: 100vh; }
+}
 @media (max-width: 600px) {
   main, main.list { padding: 24px 16px; }
 }
