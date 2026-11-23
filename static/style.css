@@ -237,6 +237,10 @@ textarea.field { padding: 10px 12px; min-height: 96px; resize: vertical; line-he
 @media (min-width: 792px) {
   .sidebar { position: sticky; top: 0; height: 100vh; }
 }
+/* Carte de connexion centrée sur l'écran entier : compense la largeur de la barre latérale. */
+@media (min-width: 1000px) {
+  main.auth { padding-right: 272px; }
+}
 @media (max-width: 600px) {
   main, main.list { padding: 24px 16px; }
 }
