@@ -1,7 +1,6 @@
 """Statistiques d'usage « style PostHog » : événements, utilisateurs actifs, entonnoir, usage de l'IA.
 
-- Les événements sont enregistrés dans Firestore (collection « events ») seulement pour les
-  personnes qui ont accepté les statistiques (champ « analytics » du profil).
+- Les événements sont enregistrés dans Firestore (collection « events »).
 - Ils ne contiennent jamais de texte saisi (CV, offres, mails) : un nom d'événement et
   quelques propriétés courtes (page, statut, durée, nombre de résultats…).
 - Si POSTHOG_API_KEY est défini, les mêmes événements sont aussi envoyés à PostHog
@@ -11,7 +10,6 @@
 import os
 import re
 import threading
-import time
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -22,7 +20,6 @@ from . import store
 EVENT_NAME = re.compile(r"^\$?[a-z][a-z0-9_]{0,39}$")
 MAX_PROPS = 20
 MAX_BATCH = 50
-CONSENT_TTL = 60  # secondes de cache du consentement
 
 # Étapes de l'entrée dans l'appli jusqu'à la préparation d'entretien.
 FUNNEL = (
@@ -35,28 +32,12 @@ FUNNEL = (
 AI_EVENTS = ("offer_summarized", "reply_analyzed", "prep_generated", "chat_message", "text_written",
              "company_search", "spontaneous_written")
 
-_consent: dict[str, tuple[bool, float]] = {}
-
-
 def now() -> datetime:
     return datetime.now(timezone.utc)
 
 
 def admin_uids() -> set[str]:
     return {u.strip() for u in os.getenv("ADMIN_UIDS", "").split(",") if u.strip()}
-
-
-def consents(uid: str) -> bool:
-    cached = _consent.get(uid)
-    if cached and cached[1] > time.monotonic():
-        return cached[0]
-    allowed = store.get_profile(uid).get("analytics") == "yes"
-    _consent[uid] = (allowed, time.monotonic() + CONSENT_TTL)
-    return allowed
-
-
-def forget_consent(uid: str) -> None:
-    _consent.pop(uid, None)
 
 
 def clean_props(props: dict | None) -> dict:
@@ -79,7 +60,7 @@ def capture(uid: str, event: str, props: dict | None = None, session: str = "") 
 def capture_many(uid: str, events: list[dict], session: str = "") -> int:
     """Enregistre des événements ; renvoie le nombre gardé. Ne lève jamais d'erreur."""
     try:
-        if not uid or not consents(uid):
+        if not uid:
             return 0
         stamp = now()
         rows = [{

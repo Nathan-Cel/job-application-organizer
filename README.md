@@ -1,6 +1,6 @@
 # Helper — Job search center
 
-Application web pour suivre ses candidatures (emploi, stage, alternance). Chaque utilisateur se connecte (Firebase Authentication) et ne voit que ses propres candidatures et fichiers. Interface en anglais ou en français (bouton EN / FR dans la barre latérale).
+Application web pour suivre ses candidatures (emploi, stage, alternance). Chaque utilisateur se connecte (Firebase Authentication) et ne voit que ses propres candidatures et fichiers. Interface en anglais ou en français (choix de la langue dans Profile).
 
 ## Fonctionnalités
 
@@ -11,11 +11,9 @@ Application web pour suivre ses candidatures (emploi, stage, alternance). Chaque
 | **Création / modification** | Deux types : à une offre ou spontanée. Seules les bases sont obligatoires ; les sections (lien de l'offre, points clés, CV, lettre, e-mail, contact, section libre) s'ajoutent, se retirent et se réordonnent. **« Fetch and summarize »** lit la page de l'offre et l'IA (**Groq**) remplit les points clés ; un champ inconnu reste vide. |
 | **Offer search** | Recherche d'offres sur le web et via l'API France Travail ; « Track » crée une candidature à partir d'une offre. |
 | **Find companies** | Candidatures spontanées, là où il y a moins de concurrence : l'utilisateur indique ce qu'il cherche, un lieu et un rayon (jusqu'à 50 km). L'IA choisit les secteurs d'activité (codes NAF, vérifiés dans la nomenclature officielle de l'INSEE) et l'**API publique « Recherche d'entreprises »** liste les entreprises actives du périmètre, triées par pertinence du secteur puis distance, filtrables par taille. Pour une entreprise : recherche de son site et des **adresses e-mail publiées** (recrutement@, contact@…, jamais devinées), rédaction d'un e-mail de candidature spontanée, ouverture dans la messagerie de l'utilisateur (qui l'envoie lui-même) et ajout à la Box. |
-| **Recruiter reply** | Colle le message d'un recruteur : l'IA en extrait le type de réponse (entretien, test, offre, demande d'infos, refus), la date, l'échéance et le contact. La candidature est retrouvée d'après l'entreprise et le poste (ou créée), puis mise à jour : statut, **prochaine étape** (affichée dans la Box), contact, historique des échanges. |
-| **Préparation d'entretien** | Sur la page d'une candidature, générée automatiquement après une réponse positive : recherches web sur l'entreprise, puis fiche avec la situation, l'entreprise (sourcée), une **analyse détaillée de chaque compétence demandée** face au CV envoyé (ou à celui du profil), un pitch, les questions probables et à poser, une checklist. |
-| **Assistant** | Discussion avec l'IA qui cherche elle-même sur le web : offres, entreprises qui recrutent, salaires, formations. |
-| **Write** | Lettre de motivation (enregistrable dans la candidature), analyse de CV face à une offre, e-mails au recruteur (répondre, accepter, décliner, relancer, remercier), pré-remplis depuis une candidature. |
-| **Profile** | Objectif, compétences et CV (import du texte depuis un PDF), utilisés par l'IA ; choix de partager ou non les statistiques d'usage. |
+| **Suggestions de l'IA** | Dans la section Lettre du formulaire, « Suggérer avec l'IA » rédige la lettre à partir de l'offre et du profil. Sur la page d'une candidature, « Répondre au recruteur » propose une réponse au message collé. |
+| **Préparation d'entretien** | Sur la page d'une candidature, sous les points clés, dans un encadré repliable : recherches web sur l'entreprise, puis fiche avec la situation, l'entreprise (sourcée), une **analyse détaillée de chaque compétence demandée** face au CV envoyé (ou à celui du profil), un pitch, les questions probables et à poser, une checklist. |
+| **Profile** | Objectif, compétences et CV (import du texte depuis un PDF), utilisés par l'IA ; langue (EN / FR) et déconnexion. |
 | **Statistics** | Réservée aux administrateurs (`ADMIN_UIDS`) : utilisateurs actifs par jour, entonnoir d'utilisation, usage et durée des fonctions IA, pages vues, dernières erreurs. |
 
 ## Installation
@@ -79,7 +77,7 @@ Sans elle, Offer search cherche quand même sur le web. Crée une application su
 
 ### Statistiques d'usage (style PostHog)
 
-À la première connexion, un bandeau demande l'accord de la personne ; sans accord, **rien n'est enregistré**. Avec accord, l'appli enregistre des événements (pages vues, candidature créée, offre résumée, réponse analysée, préparation générée, erreurs, durées des appels IA) dans la collection Firestore `events`, sans jamais de contenu (CV, offres, messages). Le choix se modifie dans Profile.
+L'appli enregistre des événements (pages vues, candidature créée, offre résumée, réponse analysée, préparation générée, erreurs, durées des appels IA) dans la collection Firestore `events`, sans jamais de contenu (CV, offres, messages) ni information personnelle.
 
 - **Page Statistics** : mets ton identifiant (affiché en bas de ta page Profile) dans `ADMIN_UIDS` (plusieurs identifiants séparés par des virgules).
 - **PostHog (optionnel)** : crée un projet sur https://posthog.com (hébergement UE conseillé), puis renseigne `POSTHOG_API_KEY` (et `POSTHOG_HOST` si besoin). Les mêmes événements y sont envoyés par le serveur ; tu profites alors de ses tableaux de bord, entonnoirs et cohortes.
@@ -124,7 +122,7 @@ app/
   data/naf.json # nomenclature officielle NAF rév. 2 (code → libellé)
   agent.py     # assistant avec outils de recherche web (function calling)
   prompts.py   # prompts (assistant, lettre, CV, e-mails, réponses, préparation)
-  analytics.py # statistiques d'usage : consentement, événements, PostHog, agrégats
+  analytics.py # statistiques d'usage : événements, PostHog, agrégats
   llm.py       # client Groq
   websearch.py # recherche web (DuckDuckGo) et lecture de pages
   jobs.py      # offres France Travail + liens externes
@@ -135,4 +133,4 @@ tests/
 
 ## Confidentialité
 
-Les candidatures et fichiers sont dans ton projet Firebase, rattachés au compte qui les a créés. Les textes (offre, message de recruteur, profil, CV) sont envoyés à Groq uniquement quand tu utilises une fonction IA. Les statistiques d'usage ne sont collectées qu'avec ton accord et ne contiennent aucun contenu.
+Les candidatures et fichiers sont dans ton projet Firebase, rattachés au compte qui les a créés. Les textes (offre, message de recruteur, profil, CV) sont envoyés à Groq uniquement quand tu utilises une fonction IA. Les statistiques d'usage ne contiennent aucun contenu ni information personnelle.

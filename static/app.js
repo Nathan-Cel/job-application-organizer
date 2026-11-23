@@ -20,11 +20,8 @@ const ICONS = {
   file: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/>',
   fileCheck: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/><path d="M9 13l2 2 4-4"/>',
   mail: '<path d="M3 5h18v14H3z"/><path d="M3 6l9 7 9-7"/>',
-  chat: '<path d="M4 5h16v11H9l-5 4z"/>',
-  pen: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
   chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
-  reply: '<path d="M10 7L4 12l6 5"/><path d="M4 12h11a5 5 0 0 1 5 5v2"/>',
   building: '<path d="M4 21V5l8-3v19M12 21V9l8 3v9M2 21h20"/><path d="M7 8h2M7 12h2M7 16h2M15 14h2M15 17h2"/>',
   spark: '<path d="M12 3v5M12 16v5M3 12h5M16 12h5M6 6l3 3M15 15l3 3M18 6l-3 3M9 15l-3 3"/>',
 };
@@ -32,7 +29,7 @@ const GRIP = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24"
   + [6, 12, 18].map((y) => `<circle cx="9" cy="${y}" r="1.6"/><circle cx="15" cy="${y}" r="1.6"/>`).join("") + "</svg>";
 
 let userId; // undefined tant que Firebase n'a pas répondu, null si déconnecté
-let me = null; // { uid, admin, analytics, profileFilled, llm } renvoyé par /api/me
+let me = null; // { uid, admin, profileFilled, llm } renvoyé par /api/me
 let apps = [];
 let appsLoaded = false;
 let rerender = () => {};
@@ -113,9 +110,6 @@ async function loadApps() {
 const NAV = [
   ["offers", "search", "nav.offers"],
   ["companies", "building", "nav.companies"],
-  ["reply", "reply", "nav.reply"],
-  ["assistant", "chat", "nav.assistant"],
-  ["write", "pen", "nav.write"],
   ["profile", "user", "nav.profile"],
 ];
 
@@ -126,9 +120,9 @@ function renderNav() {
   document.getElementById("nav").innerHTML = userId ? `
     <a href="#/"${current(!NAV.some(([key]) => key === page) && page !== "stats")}>${icon("inbox", 18)}<span class="grow">${t("nav.box")}</span><span class="count">${apps.length}</span></a>
     ${links}
-    ${me?.admin ? `<a href="#/stats"${current(page === "stats")}>${icon("chart", 18)}<span>${t("nav.stats")}</span></a>` : ""}
-    <a href="#/signout">${icon("back", 18)}<span>${t("nav.signOut")}</span></a>` : "";
-  document.getElementById("lang").innerHTML = Object.keys(LOCALES)
+    ${me?.admin ? `<a href="#/stats"${current(page === "stats")}>${icon("chart", 18)}<span>${t("nav.stats")}</span></a>` : ""}` : "";
+  // Connecté, la langue se choisit dans le profil.
+  document.getElementById("lang").innerHTML = userId ? "" : Object.keys(LOCALES)
     .map((code) => `<button type="button" data-lang="${code}" aria-pressed="${code === lang}">${code.toUpperCase()}</button>`)
     .join("");
 }
@@ -156,15 +150,10 @@ function route() {
     return authApi.signOut();
   }
   track("$pageview", { page: pageName(location.hash) });
-  renderConsent();
   if (page === "offers") return showOfferSearch();
   if (page === "companies") return showCompanies();
-  if (page === "reply") return showReply();
-  if (page === "assistant") return showAssistant();
-  if (page === "write") return showWrite(id, sub);
   if (page === "profile") return showProfile();
   if (page === "stats") return showStats();
-  if (page === "a" && sub === "reply") return showReply(id);
   if (page === "new") return showNew();
   if (page === "a" && sub === "edit") return showEdit(id);
   if (page === "a") return showDetail(id);
@@ -220,7 +209,6 @@ function renderBox() {
           </button>
           ${box.menuOpen ? `<div class="menu" role="group" aria-label="${t("filter.group")}">${filters}</div>` : ""}
         </div>
-        <a class="btn" href="#/reply">${icon("reply")}<span>${t("nav.reply")}</span></a>
         <a class="btn btn-primary" href="#/new">${icon("plus", 16, 'stroke="currentColor" stroke-width="2.25"')}<span>${t("box.new")}</span></a>
       </div>
     </header>
@@ -264,28 +252,31 @@ async function showDetail(id) {
     view.innerHTML = backLink("#/", t("back.box")) + `<div class="banner error" role="status">${esc(err.message)}</div>`;
     return;
   }
-  const expanded = { letter: false };
+  const expanded = { letter: false, prep: !app.prep }; // préparation repliée dès qu'elle existe
   const prep = { loading: false, error: "" };
-  rerender = () => renderDetail(app, expanded, prep);
+  const reply = { message: app.replies?.[0]?.message || "", loading: false, error: "", text: "" };
+  rerender = () => renderDetail(app, expanded, prep, reply);
   rerender();
+  view.oninput = (e) => {
+    if (e.target.dataset.reply !== undefined) reply.message = e.target.value;
+  };
   view.onclick = async (e) => {
+    if (copyOnClick(e, reply.text)) return;
+    const summary = e.target.closest("#prep > summary");
+    if (summary) expanded.prep = !summary.parentElement.open; // le clic précède l'ouverture native
     if (e.target.closest("[data-expand-letter]")) {
       expanded.letter = true;
       rerender();
     }
     if (e.target.closest("[data-prep]")) {
+      expanded.prep = true;
       const updated = await runPrep(app, prep, rerender);
       if (updated) app = updated;
       rerender();
     }
     if (e.target.closest("[data-copy-prep]")) navigator.clipboard.writeText(app.prep.text);
+    if (e.target.closest("[data-suggest-reply]")) suggestReply(app, reply, rerender);
   };
-  if (location.hash.endsWith("/prep") || sessionStorage.getItem("autoPrep") === id) {
-    sessionStorage.removeItem("autoPrep");
-    const updated = await runPrep(app, prep, rerender);
-    if (updated) app = updated;
-    rerender();
-  }
 }
 
 function paras(text) {
@@ -385,17 +376,19 @@ function row(...cards) {
   return html ? `<div class="cards">${html}</div>` : "";
 }
 
-function renderDetail(app, expanded, prep = {}) {
+function renderDetail(app, expanded, prep, reply) {
   const regular = app.type === "regular";
   const dates = [t("detail.updated", { date: fmtDate(app.lastStatusChangeAt) })];
   if (app.sentAt) dates.push(t("detail.sent", { date: fmtDate(app.sentAt) }));
   const reference = [contactCard(section(app, "contact"))];
   const blocks = regular
     ? [keyPointsCard(section(app, "keyPoints") || {}),
+       prepCard(app, prep, expanded.prep),
        row(companyCard(section(app, "company"))),
        row(offerCard(section(app, "offerLink")), cvCard(section(app, "cv"), app, "narrowish")),
        row(...reference, emailCard(section(app, "email")), letterCard(section(app, "letter"), expanded.letter), customCards(app))]
     : [emailCard(section(app, "email"), true),
+       prepCard(app, prep, expanded.prep),
        row(companyCard(section(app, "company"))),
        row(...reference, cvCard(section(app, "cv"), app), letterCard(section(app, "letter"), expanded.letter), customCards(app))];
 
@@ -416,13 +409,8 @@ function renderDetail(app, expanded, prep = {}) {
       </div>
     </header>
     ${nextStepBanner(app)}
-    <div class="actions">
-      <a class="btn" href="#/a/${app.id}/reply">${icon("reply")}${t("reply.add")}</a>
-      ${regular ? `<a class="btn" href="#/write/letter/${app.id}">${icon("pen")}${t("write.letter")}</a>` : ""}
-      <a class="btn" href="#/write/email/${app.id}">${icon("mail")}${t("write.email")}</a>
-    </div>
-    ${prepCard(app, prep)}
     ${blocks.filter(Boolean).join("")}
+    ${row(replyCard(reply))}
     ${repliesCard(app)}`;
 }
 
@@ -563,8 +551,13 @@ function sectionBody(s) {
         + input("why", t("form.whyCompany"), { value: s.why, sec: id, ph: t("ph.why"), area: 3 });
     case "cv":
       return dropZone(s, "form.dropCv");
-    case "letter":
-      return dropZone(s, "form.dropLetter") + input("text", t("form.letterText"), { value: s.text, sec: id, ph: t("form.letterPh"), area: 4 });
+    case "letter": {
+      const writing = s._ai === "loading";
+      return dropZone(s, "form.dropLetter") + input("text", t("form.letterText"), { value: s.text, sec: id, ph: t("form.letterPh"), area: 4, attrs: writing ? "disabled" : "" })
+        + `<div><button class="btn" type="button" data-action="suggest-letter" data-sec="${id}" ${writing ? "disabled" : ""}>${icon("spark")}${t("suggest.letter")}</button></div>`
+        + (writing ? `<p class="banner loading" role="status">${t("suggest.loading")}</p>` : "")
+        + (s._ai === "error" ? `<p class="banner error" role="status">${esc(s._aiError)}</p>` : "");
+    }
     case "email":
       return `<div class="fields">${input("to", t("form.sentTo"), { type: "email", value: s.to, sec: id, ph: "name@company.com" })}
           ${input("sentAt", t("form.dateSent"), { value: s.sentAt, sec: id, ph: t("ph.dateSent") })}</div>
@@ -733,6 +726,8 @@ function onFormClick(e) {
       return el.previousElementSibling.click();
     case "fetch":
       return fetchOffer();
+    case "suggest-letter":
+      return suggestLetter(s);
     case "delete":
       return deleteApplication();
   }
@@ -787,7 +782,7 @@ async function saveForm() {
       s.file = await api(`/api/files?name=${encodeURIComponent(s._pending.name)}`, { method: "POST", body: s._pending });
       delete s._pending;
     }
-    const sections = f.sections.map(({ _pending, paste, ...s }) => {
+    const sections = f.sections.map(({ _pending, _ai, _aiError, paste, ...s }) => {
       if (s.kind === "offerLink" && paste?.trim()) s.rawText = paste.trim();
       if (s.kind === "keyPoints") for (const k of KEY_LISTS) s[k] = s[k].split("\n").map((l) => l.trim()).filter(Boolean);
       return s;
@@ -913,7 +908,7 @@ async function onAuth(user) {
   if (userId) {
     try {
       me = await api("/api/me");
-      tracker.enabled = me.analytics === "yes";
+      tracker.enabled = true;
     } catch {}
   }
   route();

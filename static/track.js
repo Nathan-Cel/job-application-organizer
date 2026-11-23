@@ -1,6 +1,5 @@
 // Statistiques d'usage : pages vues et erreurs, envoyées par lots au serveur.
-// Le serveur ignore tout tant que la personne n'a pas accepté (profil > statistiques),
-// et ne garde jamais de texte saisi : seulement le nom de la page ou de l'erreur.
+// Jamais de texte saisi : seulement le nom de la page ou de l'erreur.
 
 const tracker = {
   queue: [],
@@ -13,7 +12,7 @@ const tracker = {
       return Math.random().toString(36).slice(2);
     }
   })(),
-  enabled: false, // vrai une fois le consentement connu et accepté
+  enabled: false, // vrai une fois connecté
 };
 
 function track(event, props = {}) {
@@ -39,8 +38,7 @@ addEventListener("error", (e) => track("client_error", { error: String(e.message
 
 // Nom de page sans identifiant : « #/a/abc123/edit » devient « application_edit ».
 function pageName(hash) {
-  const [, page = "", id, sub] = hash.split("/");
+  const [, page = "", , sub] = hash.split("/");
   if (page === "a") return sub ? `application_${sub}` : "application";
-  if (page === "write") return id ? `write_${id}` : "write";
   return page || "box";
 }

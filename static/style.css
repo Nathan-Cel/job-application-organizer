@@ -245,34 +245,14 @@ textarea.field { padding: 10px 12px; min-height: 96px; resize: vertical; line-he
 .md-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .output { border: 1px solid var(--line); padding: 20px; }
 .card.prep { flex: none; }
+.prep > summary::-webkit-details-marker { display: none; }
+.prep:not([open]) > summary { border-bottom: 0; }
+.prep[open] > summary svg { transform: rotate(180deg); }
 .reply-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 16px; }
 .reply-item { display: flex; flex-direction: column; gap: 6px; padding-bottom: 16px; border-bottom: 1px solid var(--line); font-size: 14px; }
 .reply-item:last-child { border-bottom: 0; padding-bottom: 0; }
 .reply-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 details summary { cursor: pointer; min-height: 32px; display: inline-flex; align-items: center; }
-
-/* ---------- Assistant ---------- */
-.chat-log { display: flex; flex-direction: column; gap: 12px; }
-.msg { max-width: 85%; padding: 12px 16px; font-size: 14px; line-height: 1.55; }
-.msg.user { align-self: flex-end; background: var(--green); color: #FFFFFF; }
-.msg.assistant { align-self: flex-start; background: var(--subtle); border: 1px solid var(--line); }
-.steps { margin: 0; padding-left: 18px; font-size: 12px; color: var(--muted); }
-.chat-form { display: flex; gap: 8px; align-items: flex-end; }
-.chat-form .field { flex: 1; }
-
-/* ---------- Onglets (rédaction) ---------- */
-.tabs { display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
-.tab { min-height: 44px; display: inline-flex; align-items: center; padding: 0 16px; font-size: 14px; font-weight: 500; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
-.tab:hover { color: var(--text); }
-.tab[aria-current="page"] { color: var(--green-dark); border-color: var(--green); font-weight: 600; }
-
-/* ---------- Consentement ---------- */
-.consent {
-  position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 20; max-width: 640px; margin: 0 auto;
-  display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 16px 20px;
-  background: #FFFFFF; border: 1px solid var(--control); box-shadow: var(--shadow); font-size: 14px; line-height: 1.5;
-}
-.consent p { flex: 1 1 280px; }
 
 /* ---------- Statistiques ---------- */
 .tiles { display: flex; flex-wrap: wrap; gap: 16px; }

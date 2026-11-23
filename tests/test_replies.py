@@ -180,6 +180,6 @@ def test_profile_roundtrip_and_cv_import(client, monkeypatch):  # noqa: F811
     client.put("/api/profile", json={"name": "Alex", "skills": "SQL"})
     assert client.get("/api/profile").json()["skills"] == "SQL"
     me = client.get("/api/me").json()
-    assert me["uid"] == "u1" and me["profileFilled"] is True and me["admin"] is False and me["analytics"] == ""
+    assert me["uid"] == "u1" and me["profileFilled"] is True and me["admin"] is False
     assert "text" in client.post("/api/profile/cv-text", content=_pdf()).json()
     assert client.post("/api/profile/cv-text", content=b"not a pdf").status_code == 400

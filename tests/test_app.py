@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app import analytics, jobs, llm, main, store, websearch
+from app import jobs, llm, main, store, websearch
 
 
 @pytest.fixture
@@ -44,7 +44,6 @@ def client(monkeypatch):
     monkeypatch.delenv("FRANCE_TRAVAIL_CLIENT_ID", raising=False)
     monkeypatch.delenv("FRANCE_TRAVAIL_CLIENT_SECRET", raising=False)
     main.app.dependency_overrides[main.current_user] = lambda: "u1"
-    analytics._consent.clear()
     with TestClient(main.app) as c:
         c.files, c.apps, c.profiles, c.events = files, apps, profiles, events
         yield c

@@ -5,15 +5,7 @@ from app import analytics
 from .test_app import _new, client  # noqa: F401  (fixture)
 
 
-def test_nothing_is_recorded_without_consent(client):  # noqa: F811
-    _new(client)
-    assert client.post("/api/events", json={"events": [{"event": "$pageview", "props": {"page": "box"}}]}).json() == {"stored": 0}
-    assert client.events == []
-
-
-def test_events_after_consent(client):  # noqa: F811
-    client.put("/api/profile/consent", json={"analytics": "yes"})
-    assert client.get("/api/me").json()["analytics"] == "yes"
+def test_events_are_recorded(client):  # noqa: F811
     _new(client)
     resp = client.post("/api/events", json={"session": "s1", "events": [
         {"event": "$pageview", "props": {"page": "box", "cv_text": "x" * 500, "nested": {"a": 1}}},
@@ -21,14 +13,10 @@ def test_events_after_consent(client):  # noqa: F811
     ]})
     assert resp.json() == {"stored": 1}
     names = [e["event"] for e in client.events]
-    assert names == ["analytics_accepted", "application_created", "$pageview"]
+    assert names == ["application_created", "$pageview"]
     page = client.events[-1]
     assert page["uid"] == "u1" and page["session"] == "s1"
     assert page["props"]["cv_text"] == "x" * 120 and "nested" not in page["props"]  # textes tronqués, objets refusés
-
-    client.put("/api/profile/consent", json={"analytics": "no"})
-    _new(client)
-    assert len(client.events) == 3  # plus rien après le refus
 
 
 def test_posthog_forwarding(client, monkeypatch):  # noqa: F811
@@ -36,7 +24,7 @@ def test_posthog_forwarding(client, monkeypatch):  # noqa: F811
     monkeypatch.setenv("POSTHOG_API_KEY", "phc_test")
     monkeypatch.setattr(analytics.httpx, "post", lambda url, json, timeout: sent.append((url, json)))
     monkeypatch.setattr(analytics.threading, "Thread", lambda target, daemon: type("T", (), {"start": lambda self: target()})())
-    client.put("/api/profile/consent", json={"analytics": "yes"})
+    _new(client)
     url, body = sent[0]
     assert url == "https://eu.i.posthog.com/batch/"
     assert body["api_key"] == "phc_test" and body["batch"][0]["distinct_id"] == "u1"
@@ -45,7 +33,6 @@ def test_posthog_forwarding(client, monkeypatch):  # noqa: F811
 def test_stats_reserved_to_admins(client, monkeypatch):  # noqa: F811
     assert client.get("/api/stats").status_code == 403
     monkeypatch.setenv("ADMIN_UIDS", "someone, u1")
-    client.put("/api/profile/consent", json={"analytics": "yes"})
     _new(client)
     data = client.get("/api/stats", params={"days": 7}).json()
     assert data["totals"]["users"] == 1 and data["totals"]["activeToday"] == 1

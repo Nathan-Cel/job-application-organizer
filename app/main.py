@@ -54,10 +54,6 @@ class ProfileIn(BaseModel):
     cv: str = ""
 
 
-class ConsentIn(BaseModel):
-    analytics: Literal["yes", "no"]
-
-
 class ReplyRequest(BaseModel):
     message: str
     applicationId: str = ""
@@ -138,7 +134,7 @@ def _ms(started: float) -> int:
 def me(uid: str = Depends(current_user)):
     profile = store.get_profile(uid)
     return {
-        "uid": uid, "admin": uid in analytics.admin_uids(), "analytics": profile.get("analytics", ""),
+        "uid": uid, "admin": uid in analytics.admin_uids(),
         "profileFilled": bool((profile.get("cv") or "").strip() or (profile.get("skills") or "").strip()),
         "llm": llm.is_configured(),
     }
@@ -155,14 +151,6 @@ def put_profile(data: ProfileIn, uid: str = Depends(current_user)):
     saved = store.save_profile(uid, data.model_dump())
     analytics.capture(uid, "profile_saved", {"has_cv": bool(data.cv.strip()), "has_skills": bool(data.skills.strip())})
     return {f: saved.get(f, "") for f in PROFILE_FIELDS}
-
-
-@app.put("/api/profile/consent")
-def put_consent(data: ConsentIn, uid: str = Depends(current_user)):
-    store.save_profile(uid, {"analytics": data.analytics})
-    analytics.forget_consent(uid)
-    analytics.capture(uid, "analytics_accepted")  # n'est enregistré que si la personne a accepté
-    return {"analytics": data.analytics}
 
 
 @app.post("/api/profile/cv-text")
@@ -526,7 +514,7 @@ async def spontaneous_application(req: SpontaneousIn, uid: str = Depends(current
 
 @app.post("/api/events", status_code=202)
 def collect_events(data: EventsIn, uid: str = Depends(current_user)):
-    """Événements envoyés par l'interface (pages vues, erreurs) : ignorés sans consentement."""
+    """Événements envoyés par l'interface (pages vues, erreurs)."""
     return {"stored": analytics.capture_many(uid, data.events, data.session)}
 
 
