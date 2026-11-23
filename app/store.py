@@ -8,6 +8,8 @@ import os
 from datetime import datetime, timezone
 from functools import cache
 
+import google.auth
+from google.auth.transport.requests import AuthorizedSession
 from google.cloud import firestore
 
 CHUNK_SIZE = 900_000
@@ -47,6 +49,28 @@ def update_application(app_id: str, data: dict) -> dict:
 
 def delete_application(app_id: str) -> None:
     _db().collection("applications").document(app_id).delete()
+
+
+# ---------- Statistiques ----------
+
+def list_application_dates() -> list[str]:
+    return [d.get("createdAt") for d in _db().collection("applications").select(["createdAt"]).stream()]
+
+
+def list_account_dates() -> list[str]:
+    """Dates de création des comptes Firebase Auth, via l'API Identity Toolkit."""
+    session = AuthorizedSession(google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])[0])
+    url = f"https://identitytoolkit.googleapis.com/v1/projects/{os.getenv('FIREBASE_PROJECT_ID')}/accounts:batchGet"
+    dates, page = [], ""
+    while True:
+        response = session.get(url, params={"maxResults": 1000, "nextPageToken": page})
+        response.raise_for_status()
+        body = response.json()
+        dates += [datetime.fromtimestamp(int(u["createdAt"]) / 1000, timezone.utc).isoformat(timespec="seconds")
+                  for u in body.get("users", [])]
+        page = body.get("nextPageToken")
+        if not page:
+            return dates
 
 
 # ---------- Fichiers ----------

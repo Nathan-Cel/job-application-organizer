@@ -68,6 +68,8 @@ def use_memory_store() -> None:
         "save_profile": save_profile,
         "add_events": events.extend,
         "list_events": lambda since, limit=20000: [e for e in events if e["at"] >= since][-limit:],
+        "list_account_dates": lambda: [],
+        "list_application_dates": lambda: [d["createdAt"] for d in apps.values()],
     }
     for name, fn in replacements.items():
         setattr(store, name, fn)

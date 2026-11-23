@@ -226,8 +226,13 @@ async function writeSpontaneous(c, st) {
 async function addToBox(c, st) {
   st.adding = true;
   renderCompanies();
+  const { subject, body } = st.email;
+  // Une conversation exige une adresse : sans elle, le brouillon est gardé dans une section libre.
+  const draft = st.to
+    ? { id: "s-mail", kind: "conversation", name: c.name, handle: st.to, platform: "E-mail", messages: [{ date: "", text: `${subject}\n\n${body}` }] }
+    : { id: "s-mail", kind: "custom", title: subject, content: body };
   const sections = [
-    { id: "s-email", kind: "email", to: st.to || "", sentAt: "", subject: st.email.subject, body: st.email.body },
+    draft,
     { id: "s-company", kind: "company", summary: [c.activityLabel, c.address, st.contact?.website].filter(Boolean).join("\n"), why: "" },
   ];
   if (st.to) sections.push({ id: "s-contact", kind: "contact", name: "", position: "", email: st.to, phone: "", extra: [] });

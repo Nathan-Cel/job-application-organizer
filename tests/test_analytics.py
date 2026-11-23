@@ -37,6 +37,7 @@ def test_stats_reserved_to_admins(client, monkeypatch):  # noqa: F811
     data = client.get("/api/stats", params={"days": 7}).json()
     assert data["totals"]["users"] == 1 and data["totals"]["activeToday"] == 1
     assert len(data["daily"]) == 7
+    assert data["history"]["daily"][0]["totalApplications"] == 1  # historique calculé sur les candidatures existantes
     assert client.get("/api/me").json()["admin"] is True
 
 

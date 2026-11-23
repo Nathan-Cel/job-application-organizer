@@ -1,4 +1,5 @@
-// Page Statistiques (administrateurs) : utilisateurs actifs, entonnoir, usage des fonctionnalités et de l'IA.
+// Page Statistiques (administrateurs) : comptes et candidatures depuis le début, utilisateurs actifs, entonnoir,
+// usage des fonctionnalités et de l'IA.
 
 const statsState = { days: 30, data: null, error: "", loading: false };
 
@@ -68,6 +69,15 @@ function table(head, rows) {
     <tbody>${rows.map((r) => `<tr>${r.map((c, i) => `<td${i ? ' class="num"' : ""}>${c}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
 
+// Comptes et candidatures créés, depuis le premier enregistrement (indépendant de la période choisie).
+function historyCard(h) {
+  const head = [t("stats.newAccounts"), t("stats.totalAccounts"), t("stats.newApplications"), t("stats.totalApplications")];
+  const rows = (list) => list.map((r) => [fmtDate(r.period), num(r.accounts), num(r.totalAccounts), num(r.applications), num(r.totalApplications)]);
+  return card(t("stats.historyTitle"), `<p class="help">${t("stats.historyHelp")}</p>
+    ${table([t("stats.week"), ...head], rows(h.weekly))}
+    <details><summary class="link">${t("stats.showDaily")}</summary>${table([t("stats.day"), ...head], rows(h.daily))}</details>`);
+}
+
 function renderStats() {
   const s = statsState;
   const d = s.data;
@@ -85,6 +95,7 @@ function renderStats() {
         ${tile(t("stats.sessions"), num(tt.sessions))}
         ${tile(t("stats.events"), num(tt.events))}
       </div>
+      ${historyCard(d.history)}
       ${card(t("stats.dailyTitle"), dailyChart(d.daily)
         + `<details><summary class="link">${t("stats.showTable")}</summary>${table([t("stats.day"), t("stats.users"), t("stats.events")],
           d.daily.filter((x) => x.events).map((x) => [fmtDate(x.day), num(x.users), num(x.events)]))}</details>`)}

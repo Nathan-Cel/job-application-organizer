@@ -1,8 +1,11 @@
 const view = document.getElementById("view");
 const STATUSES = ["notsent", "sent", "positive", "refused"];
 const LOGO_COLORS = ["#1F2937", "#1E3A5F", "#334155", "#3F3F46", "#44403C", "#164E63"];
-const SECTION_KINDS = ["offerLink", "keyPoints", "company", "cv", "letter", "email", "contact", "custom"];
-const DEFAULT_SECTIONS = { regular: ["offerLink", "keyPoints", "cv", "email"], spontaneous: ["email", "cv"] };
+const SECTION_KINDS = ["offerLink", "keyPoints", "company", "cv", "letter", "conversation", "contact", "custom"];
+const REPEATABLE = ["conversation", "custom"];
+const DEFAULT_SECTIONS = { regular: ["offerLink", "keyPoints", "cv"], spontaneous: ["cv"] };
+const CONVERSATION_REQUIRED = ["name", "handle", "platform"];
+const NEW_ITEM = { extra: { label: "", value: "" }, messages: { date: "", text: "" } };
 const KEY_FIELDS = ["contract", "salary", "workMode", "experience", "start"];
 const KEY_LISTS = ["responsibilities", "requirements"];
 
@@ -25,6 +28,7 @@ const ICONS = {
   building: '<path d="M4 21V5l8-3v19M12 21V9l8 3v9M2 21h20"/><path d="M7 8h2M7 12h2M7 16h2M15 14h2M15 17h2"/>',
   expand: '<path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/>',
   spark: '<path d="M12 3v5M12 16v5M3 12h5M16 12h5M6 6l3 3M15 15l3 3M18 6l-3 3M9 15l-3 3"/>',
+  link: '<path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1"/><path d="M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1"/>',
 };
 const GRIP = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="#9CA3AF">'
   + [6, 12, 18].map((y) => `<circle cx="9" cy="${y}" r="1.6"/><circle cx="15" cy="${y}" r="1.6"/>`).join("") + "</svg>";
@@ -111,6 +115,7 @@ async function loadApps() {
 const NAV = [
   ["offers", "search", "nav.offers"],
   ["companies", "building", "nav.companies"],
+  ["agent", "link", "nav.agent"],
   ["profile", "user", "nav.profile"],
 ];
 
@@ -153,6 +158,7 @@ function route() {
   track("$pageview", { page: pageName(location.hash) });
   if (page === "offers") return showOfferSearch();
   if (page === "companies") return showCompanies();
+  if (page === "agent") return showAgent();
   if (page === "profile") return showProfile();
   if (page === "stats") return showStats();
   if (page === "new") return showNew();
@@ -165,11 +171,12 @@ window.onhashchange = route;
 
 // ---------- Box ----------
 
-const box = { filter: "all", menuOpen: false, query: "" };
+const box = { filter: "all", menuOpen: false, query: "", ioOpen: false, view: "date", closed: new Set(), notice: null };
 
 async function showBox() {
   view.className = "list";
   rerender = renderBox;
+  box.notice = null;
   renderBox();
   try {
     await loadApps();
@@ -189,21 +196,31 @@ function renderBox() {
     return `<button type="button" data-filter="${key}" aria-pressed="${box.filter === key}">
       <span class="mark" aria-hidden="true"></span><span class="grow">${label}</span><span class="count">${count}</span></button>`;
   }).join("");
-  const rows = shown.map((a) => `
-    <div class="row">
-      <div class="col-main">${logo(a.company)}
-        <a class="row-link" href="#/a/${a.id}"><strong>${esc(a.company)}</strong><span>${esc(a.jobTitle || (a.type === "spontaneous" ? t("type.spontaneous") : ""))}</span></a>
-        ${nextStepTag(a)}
-      </div>
-      <div class="col-status">${statusTag(a.status)}</div>
-      <div class="col-date">${fmtDate(a.lastStatusChangeAt)}</div>
-    </div>`).join("");
+  const rows = box.view === "date" ? shown.map(appRow).join("") : groupByCompany(shown).map((g) => {
+    const open = !box.closed.has(g.key);
+    return `<button class="row group" type="button" data-group="${esc(g.key)}" aria-expanded="${open}">
+        ${icon("chevron", 16, 'stroke="currentColor" stroke-width="2"')}<strong class="grow">${esc(g.name)}</strong><span class="count">${g.apps.length}</span>
+      </button>${open ? g.apps.map(appRow).join("") : ""}`;
+  }).join("");
+  const views = ["date", "company"].map((v) =>
+    `<button class="btn" type="button" data-view="${v}" aria-pressed="${box.view === v}">${t("box.by." + v)}</button>`).join("");
 
   view.innerHTML = `
     <header class="page-head">
       <h1>${t("nav.box")}</h1>
       <div class="tools">
         <input class="field search" type="search" id="box-search" value="${esc(box.query)}" placeholder="${t("box.search")}" aria-label="${t("box.search")}">
+        <div class="seg" role="group" aria-label="${t("box.view")}">${views}</div>
+        <div class="menu-wrap">
+          <button class="btn" type="button" id="io-btn" aria-haspopup="true" aria-expanded="${box.ioOpen}">${t("io.label")}${icon("chevron", 14, 'stroke="currentColor" stroke-width="2"')}</button>
+          ${box.ioOpen ? `<div class="menu wide" role="group" aria-label="${t("io.label")}">
+            <button type="button" data-export="csv">${t("io.exportCsv")}</button>
+            <button type="button" data-export="json">${t("io.exportJson")}</button>
+            <input type="file" accept=".csv,.json" hidden data-import>
+            <button type="button" data-action="import">${t("io.import")}</button>
+            <p class="help">${t("io.help")}</p>
+          </div>` : ""}
+        </div>
         <div class="menu-wrap">
           <button class="btn" type="button" id="filter-btn" aria-haspopup="true" aria-expanded="${box.menuOpen}">
             ${icon("filter")}<span>${box.filter === "all" ? t("filter.label") : t("filter.active", { status: t("status." + box.filter) })}</span>${icon("chevron", 14, 'stroke="currentColor" stroke-width="2"')}
@@ -213,6 +230,7 @@ function renderBox() {
         <a class="btn btn-primary" href="#/new">${icon("plus", 16, 'stroke="currentColor" stroke-width="2.25"')}<span>${t("box.new")}</span></a>
       </div>
     </header>
+    ${box.notice ? `<p class="banner ${box.notice.cls}" role="status">${esc(box.notice.text)}</p>` : ""}
     <section class="table" aria-label="${t("box.applications")}">
       <div class="table-inner">
         <div class="row head"><div class="col-main">${t("box.colMain")}</div><div class="col-status">${t("box.colStatus")}</div><div class="col-date">${t("box.colDate")}</div></div>
@@ -225,11 +243,29 @@ function renderBox() {
       box.menuOpen = !box.menuOpen;
       renderBox();
     }
+    if (e.target.closest("#io-btn")) {
+      box.ioOpen = !box.ioOpen;
+      renderBox();
+    }
     const pick = e.target.closest("[data-filter]");
     if (pick) {
       Object.assign(box, { filter: pick.dataset.filter, menuOpen: false });
       renderBox();
     }
+    const pickView = e.target.closest("[data-view]");
+    if (pickView) {
+      box.view = pickView.dataset.view;
+      renderBox();
+    }
+    const group = e.target.closest("[data-group]");
+    if (group) {
+      const key = group.dataset.group;
+      box.closed.has(key) ? box.closed.delete(key) : box.closed.add(key);
+      renderBox();
+    }
+    const exportFmt = e.target.closest("[data-export]")?.dataset.export;
+    if (exportFmt) location.href = `/api/export/${exportFmt}`;
+    if (e.target.closest('[data-action="import"]')) view.querySelector("[data-import]").click();
   };
   view.oninput = (e) => {
     if (e.target.id !== "box-search") return;
@@ -239,6 +275,46 @@ function renderBox() {
     input.focus();
     input.setSelectionRange(input.value.length, input.value.length);
   };
+  view.onchange = (e) => {
+    if (e.target.dataset.import !== undefined) importFile(e.target.files[0]);
+  };
+}
+
+function appRow(a) {
+  return `
+    <div class="row">
+      <div class="col-main">${logo(a.company)}
+        <a class="row-link" href="#/a/${a.id}"><strong>${esc(a.company)}</strong><span>${esc(a.jobTitle || (a.type === "spontaneous" ? t("type.spontaneous") : ""))}</span></a>
+        ${nextStepTag(a)}
+      </div>
+      <div class="col-status">${statusTag(a.status)}</div>
+      <div class="col-date">${fmtDate(a.lastStatusChangeAt)}</div>
+    </div>`;
+}
+
+// Groupes par entreprise, dans l'ordre alphabétique ; dans un groupe, l'ordre de `apps` (par date).
+function groupByCompany(list) {
+  const groups = new Map();
+  for (const a of list) {
+    const key = a.company.trim().toLowerCase();
+    if (!groups.has(key)) groups.set(key, { key, name: a.company.trim(), apps: [] });
+    groups.get(key).apps.push(a);
+  }
+  return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name, LOCALES[lang]));
+}
+
+async function importFile(file) {
+  if (!file) return;
+  const fmt = file.name.toLowerCase().endsWith(".json") ? "json" : "csv";
+  box.ioOpen = false;
+  try {
+    const r = await api(`/api/import/${fmt}`, { method: "POST", body: file });
+    box.notice = { cls: "success", text: t("io.imported", { n: r.imported }) };
+    await loadApps();
+  } catch (err) {
+    box.notice = { cls: "error", text: err.message };
+  }
+  renderBox();
 }
 
 // ---------- Page d'une candidature ----------
@@ -362,12 +438,13 @@ function contactCard(s) {
   return parts.length ? card(t("detail.contact"), parts.join(""), { cls: "contact", key: "contact" }) : "";
 }
 
-function emailCard(s, main = false) {
-  if (!s || !(s.to || s.subject || s.sentAt || s.body)) return "";
-  const meta = [["to", s.to], ["subject", s.subject], ["sent", s.sentAt]]
-    .filter(([, v]) => v).map(([k, v]) => `<div>${t("email." + k)}: <span>${esc(v)}</span></div>`).join("");
-  const body = s.body ? `${meta ? '<div class="rule"></div>' : ""}<div class="prose clamp${main ? " big" : ""}">${paras(s.body)}</div>` : "";
-  return card(t("section.email"), `<div class="mail-meta${main ? " inline" : ""}">${meta}</div>${body}`, { cls: main ? "key" : "", key: "email" });
+function conversationCards(app, main = false) {
+  return app.sections.filter((s) => s.kind === "conversation").map((s, i) => {
+    const who = `<div class="mail-meta${main ? " inline" : ""}"><span>${esc(s.name)}</span><div>${esc(s.platform)}: <span>${esc(s.handle)}</span></div></div>`;
+    const messages = (s.messages || []).filter((m) => m.text).map((m) => `<div class="rule"></div>
+      ${m.date ? `<div class="micro">${fmtDate(m.date)}</div>` : ""}<div class="prose${main ? " big" : ""}">${paras(m.text)}</div>`).join("");
+    return card(t("section.conversation"), who + (messages ? `<div class="clamp">${messages}</div>` : ""), { cls: main ? "key" : "", key: `conv${i}` });
+  }).join("");
 }
 
 function letterCard(s) {
@@ -397,8 +474,8 @@ function renderDetail(app, expanded, prep) {
        prepCard(app, prep, expanded.prep),
        row(companyCard(section(app, "company"))),
        row(offerCard(section(app, "offerLink")), cvCard(section(app, "cv"), app, "narrowish")),
-       row(...reference, emailCard(section(app, "email")), letterCard(section(app, "letter")), customCards(app))]
-    : [emailCard(section(app, "email"), true),
+       row(...reference, conversationCards(app), letterCard(section(app, "letter")), customCards(app))]
+    : [conversationCards(app, true),
        prepCard(app, prep, expanded.prep),
        row(companyCard(section(app, "company"))),
        row(...reference, cvCard(section(app, "cv"), app), letterCard(section(app, "letter")), customCards(app))];
@@ -440,13 +517,13 @@ function newSection(kind, values = {}) {
     company: { summary: "", why: "", filledByAi: false },
     cv: {},
     letter: { text: "" },
-    email: { to: "", sentAt: "", subject: "", body: "" },
+    conversation: { name: "", handle: "", platform: "", messages: [] },
     contact: { name: "", position: "", email: "", phone: "", extra: [] },
     custom: { title: "", content: "" },
   }[kind];
   const s = { ...base, ...values, kind, id: values.id || `s${nextSectionId++}` };
   if (kind === "keyPoints") for (const k of KEY_LISTS) if (Array.isArray(s[k])) s[k] = s[k].join("\n");
-  if (kind === "contact") s.extra = (s.extra || []).map((x) => ({ ...x }));
+  for (const list of Object.keys(NEW_ITEM)) if (s[list]) s[list] = s[list].map((x) => ({ ...x }));
   return s;
 }
 
@@ -571,11 +648,17 @@ function sectionBody(s) {
         + (writing ? `<p class="banner loading" role="status">${t("suggest.loading")}</p>` : "")
         + (s._ai === "error" ? `<p class="banner error" role="status">${esc(s._aiError)}</p>` : "");
     }
-    case "email":
-      return `<div class="fields">${input("to", t("form.sentTo"), { type: "email", value: s.to, sec: id, ph: "name@company.com" })}
-          ${input("sentAt", t("form.dateSent"), { value: s.sentAt, sec: id, ph: t("ph.dateSent") })}</div>
-        ${input("subject", t("form.subject"), { value: s.subject, sec: id, ph: t("ph.subject") })}
-        ${input("body", t("form.message"), { value: s.body, sec: id, ph: t("ph.message"), area: 6 })}`;
+    case "conversation":
+      return `<div class="fields">
+          ${input("name", t("form.name"), { value: s.name, sec: id, ph: t("ph.name"), attrs: "required" })}
+          ${input("handle", t("form.handle"), { value: s.handle, sec: id, ph: t("ph.handle"), attrs: "required" })}
+          ${input("platform", t("form.platform"), { value: s.platform, sec: id, ph: t("ph.platform"), attrs: "required" })}</div>
+        ${s.messages.map((m, i) => `<div class="rule"></div>
+          <div class="fields">
+            ${input("date", t("form.date"), { type: "date", value: m.date, sec: id, attrs: `data-list="messages" data-i="${i}"` })}
+            ${removeItemButton(id, "messages", i, t("form.removeMessage"))}</div>
+          ${input("text", t("form.message"), { value: m.text, sec: id, ph: t("ph.message"), area: 4, attrs: `data-list="messages" data-i="${i}"` })}`).join("")}
+        <div>${addItemButton(id, "messages", t("form.addMessage"))}</div>`;
     case "contact":
       return `<div class="fields">
           ${input("name", t("form.name"), { value: s.name, sec: id, ph: t("ph.name") })}
@@ -583,14 +666,23 @@ function sectionBody(s) {
           ${input("email", t("contact.email"), { type: "email", value: s.email, sec: id, ph: "name@company.com" })}
           ${input("phone", t("contact.phone"), { type: "tel", value: s.phone, sec: id, ph: "+00 0 00 00 00 00" })}</div>
         ${s.extra.map((x, i) => `<div class="fields">
-          ${input("label", t("form.fieldName"), { value: x.label, sec: id, ph: t("ph.fieldName"), attrs: `data-extra="${i}"` })}
-          ${input("value", t("form.fieldValue"), { value: x.value, sec: id, attrs: `data-extra="${i}"` })}
-          <button class="icon-btn boxed" type="button" aria-label="${t("form.removeField")}" data-action="remove-extra" data-sec="${id}" data-extra="${i}">${icon("close", 16, 'stroke="currentColor" stroke-width="2"')}</button></div>`).join("")}
-        <div><button class="btn" type="button" data-action="add-extra" data-sec="${id}">${icon("plus", 14, 'stroke="currentColor" stroke-width="2.25"')}${t("form.addField")}</button></div>`;
+          ${input("label", t("form.fieldName"), { value: x.label, sec: id, ph: t("ph.fieldName"), attrs: `data-list="extra" data-i="${i}"` })}
+          ${input("value", t("form.fieldValue"), { value: x.value, sec: id, attrs: `data-list="extra" data-i="${i}"` })}
+          ${removeItemButton(id, "extra", i, t("form.removeField"))}</div>`).join("")}
+        <div>${addItemButton(id, "extra", t("form.addField"))}</div>`;
     case "custom":
       return input("title", t("form.sectionTitle"), { value: s.title, sec: id, ph: t("ph.sectionTitle") })
         + input("content", t("form.content"), { value: s.content, sec: id, ph: t("ph.content"), area: 4 });
   }
+}
+
+// Boutons pour ajouter ou retirer un élément d'une liste de section (champs du contact, messages).
+function addItemButton(sec, list, label) {
+  return `<button class="btn" type="button" data-action="add-item" data-sec="${sec}" data-list="${list}">${icon("plus", 14, 'stroke="currentColor" stroke-width="2.25"')}${label}</button>`;
+}
+
+function removeItemButton(sec, list, i, label) {
+  return `<button class="icon-btn boxed" type="button" aria-label="${label}" data-action="remove-item" data-sec="${sec}" data-list="${list}" data-i="${i}">${icon("close", 16, 'stroke="currentColor" stroke-width="2"')}</button>`;
 }
 
 function renderForm() {
@@ -599,7 +691,7 @@ function renderForm() {
   const editing = Boolean(f.id);
   const present = new Set(f.sections.map((s) => s.kind));
   const options = SECTION_KINDS
-    .filter((k) => (regular || !["offerLink", "keyPoints"].includes(k)) && (k === "custom" || !present.has(k)))
+    .filter((k) => (regular || !["offerLink", "keyPoints"].includes(k)) && (REPEATABLE.includes(k) || !present.has(k)))
     .map((k) => `<button class="option" type="button" data-add="${k}"><strong>${t("section." + k)}</strong><span>${t("desc." + k)}</span></button>`)
     .join("");
   const last = f.sections.length - 1;
@@ -677,14 +769,14 @@ function findSection(id) {
 }
 
 function onFormInput(e) {
-  const { key, sec, extra } = e.target.dataset;
+  const { key, sec, list, i } = e.target.dataset;
   if (!key) return;
   if (!sec) {
     form[key] = e.target.value;
     return;
   }
   const s = findSection(sec);
-  if (extra !== undefined) s.extra[extra][key] = e.target.value;
+  if (list) s[list][i][key] = e.target.value;
   else s[key] = e.target.value;
   if ("filledByAi" in s && key !== "why") s.filledByAi = false;
 }
@@ -729,11 +821,11 @@ function onFormClick(e) {
     case "remove":
       list.splice(list.indexOf(s), 1);
       break;
-    case "add-extra":
-      s.extra.push({ label: "", value: "" });
+    case "add-item":
+      s[el.dataset.list].push({ ...NEW_ITEM[el.dataset.list] });
       break;
-    case "remove-extra":
-      s.extra.splice(Number(el.dataset.extra), 1);
+    case "remove-item":
+      s[el.dataset.list].splice(Number(el.dataset.i), 1);
       break;
     case "choose":
       return el.previousElementSibling.click();
@@ -787,6 +879,10 @@ async function saveForm() {
     f.error = t("form.companyRequired");
     return renderForm();
   }
+  if (f.sections.some((s) => s.kind === "conversation" && !CONVERSATION_REQUIRED.every((k) => s[k].trim()))) {
+    f.error = t("form.conversationRequired");
+    return renderForm();
+  }
   Object.assign(f, { saving: true, error: "" });
   renderForm();
   try {
@@ -829,6 +925,29 @@ async function deleteApplication() {
 
 const search = { params: { q: "", location: "", department: "", kind: "emploi" }, data: null, loading: false, error: "" };
 let found = [];
+
+// ---------- Lien MCP pour les agents ----------
+
+async function showAgent() {
+  view.className = "list";
+  rerender = showAgent;
+  view.innerHTML = `<h1>${t("nav.agent")}</h1>`;
+  try {
+    const { path } = await api("/api/mcp/link");
+    const tools = ["list_applications", "get_application", "create_application", "update_application"];
+    view.innerHTML += `<p>${t("agent.help")}</p>
+      <ul>${tools.map((name) => `<li><code>${name}</code> : ${t("agent." + name)}</li>`).join("")}</ul>
+      <p class="banner error" role="note"><strong>${t("agent.warning")}</strong></p>
+      <div class="actions"><button class="btn btn-primary" type="button" id="copy-link">${t("agent.copy")}</button></div>`;
+    view.onclick = async (e) => {
+      if (e.target.id !== "copy-link") return;
+      await navigator.clipboard.writeText(location.origin + path);
+      e.target.textContent = t("agent.copied");
+    };
+  } catch (err) {
+    view.innerHTML += `<p class="banner error" role="status">${esc(err.message)}</p>`;
+  }
+}
 
 function showOfferSearch() {
   view.className = "list";
@@ -928,20 +1047,35 @@ async function onAuth(user) {
   if (userId && location.hash.split("/")[1]) loadApps().catch(() => {}); // Box charge déjà la liste
 }
 
+let authMode = "signIn"; // ou "signUp"
+
+const GOOGLE_LOGO = `<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+</svg>`;
+
 function showLogin() {
   rerender = showLogin;
+  const other = authMode === "signIn" ? "signUp" : "signIn";
+  view.className = "auth";
   view.innerHTML = `
-    <h1>${t("auth.title")}</h1>
-    <form class="login">
-      <label class="lbl"><span>${t("auth.email")}</span><input class="field" type="email" name="email" required autocomplete="email"></label>
-      <label class="lbl"><span>${t("auth.password")}</span><input class="field" type="password" name="password" required minlength="6" autocomplete="current-password"></label>
-      <div class="fields">
-        <button class="btn btn-primary" name="signIn">${t("auth.signIn")}</button>
-        <button class="btn" name="signUp">${t("auth.signUp")}</button>
+    <div class="auth-card">
+      <div class="stack">
+        <h1>${t(`auth.${authMode}.title`)}</h1>
+        <p class="lead">${t(`auth.${authMode}.lead`)}</p>
       </div>
-      <button type="button" class="btn" data-google>${t("auth.google")}</button>
-      <p class="banner error" role="status" hidden></p>
-    </form>`;
+      <button type="button" class="btn" data-google>${GOOGLE_LOGO}${t("auth.google")}</button>
+      <div class="auth-or">${t("auth.or")}</div>
+      <form class="login">
+        <label class="lbl"><span>${t("auth.email")}</span><input class="field" type="email" name="email" required autocomplete="email"></label>
+        <label class="lbl"><span>${t("auth.password")}</span><input class="field" type="password" name="password" required minlength="6" autocomplete="${authMode === "signIn" ? "current-password" : "new-password"}"></label>
+        <button class="btn btn-primary">${t(`auth.${authMode}`)}</button>
+        <p class="banner error" role="status" hidden></p>
+      </form>
+      <p class="auth-switch">${t(`auth.${authMode}.switch`)} <button type="button" class="link" data-switch>${t(`auth.${other}`)}</button></p>
+    </div>`;
   const error = view.querySelector(".banner");
   const attempt = (promise) => promise.catch((err) => {
     error.textContent = err.message;
@@ -950,9 +1084,13 @@ function showLogin() {
   view.onsubmit = (e) => {
     e.preventDefault();
     const { email, password } = e.target.elements;
-    attempt(authApi[e.submitter.name](email.value, password.value));
+    attempt(authApi[authMode](email.value, password.value));
   };
   view.onclick = (e) => {
     if (e.target.closest("[data-google]")) attempt(authApi.google());
+    if (e.target.closest("[data-switch]")) {
+      authMode = other;
+      showLogin();
+    }
   };
 }
