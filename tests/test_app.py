@@ -255,3 +255,19 @@ def test_stats_admins_only(client, monkeypatch):
     assert client.get("/api/stats").status_code == 403
     main.app.dependency_overrides[main._claims] = lambda: {"sub": "u1", "email": "admin@example.com"}
     assert client.get("/api/stats").json() == {"daily": [], "weekly": []}
+
+
+def test_reviews(client, monkeypatch):
+    reviews = []
+    monkeypatch.setattr(store, "create_review", reviews.append)
+    monkeypatch.setattr(store, "list_reviews", lambda: reviews)
+    monkeypatch.setenv("ADMIN_EMAILS", "admin@example.com")
+    main.app.dependency_overrides[main._claims] = lambda: {"sub": "u1", "email": "user@example.com"}
+    assert client.post("/api/reviews", json={"comment": ""}).status_code == 422
+    assert client.post("/api/reviews", json={"comment": "Add reminders"}).status_code == 201
+    assert client.get("/api/reviews").status_code == 403
+    assert client.get("/api/me").json() == {"admin": False}
+    main.app.dependency_overrides[main._claims] = lambda: {"sub": "u2", "email": "admin@example.com"}
+    assert client.get("/api/me").json() == {"admin": True}
+    [review] = client.get("/api/reviews").json()
+    assert review["comment"] == "Add reminders" and review["email"] == "user@example.com"

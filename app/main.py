@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 load_dotenv()
 
@@ -44,6 +44,10 @@ class ApplicationIn(BaseModel):
     sections: list[dict] = []
 
 
+class ReviewIn(BaseModel):
+    comment: str = Field(min_length=1)
+
+
 class OfferRequest(BaseModel):
     url: str = ""
     text: str = ""
@@ -68,10 +72,19 @@ def current_user(claims: dict = Depends(_claims)) -> str:
     return claims["sub"]
 
 
-def admin_user(claims: dict = Depends(_claims)) -> None:
+def _is_admin(claims: dict) -> bool:
     admins = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
-    if claims.get("email", "").lower() not in admins:
+    return claims.get("email", "").lower() in admins
+
+
+def admin_user(claims: dict = Depends(_claims)) -> None:
+    if not _is_admin(claims):
         raise HTTPException(status_code=403, detail="Administrators only.")
+
+
+@app.get("/api/me")
+def me(claims: dict = Depends(_claims)):
+    return {"admin": _is_admin(claims)}
 
 
 # ---------- Statistiques ----------
@@ -85,6 +98,19 @@ def stats_page():
 def get_stats():
     return stats.evolution(store.list_account_dates(), store.list_application_dates(),
                            datetime.now(timezone.utc).date())
+
+
+# ---------- Avis ----------
+
+@app.post("/api/reviews", status_code=201)
+def create_review(data: ReviewIn, claims: dict = Depends(_claims)):
+    store.create_review({**data.model_dump(), "uid": claims["sub"], "email": claims.get("email", ""),
+                         "createdAt": store.now()})
+
+
+@app.get("/api/reviews", dependencies=[Depends(admin_user)])
+def list_reviews():
+    return sorted(store.list_reviews(), key=lambda r: r["createdAt"], reverse=True)
 
 
 # ---------- Candidatures ----------

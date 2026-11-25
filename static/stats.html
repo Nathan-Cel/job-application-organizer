@@ -8,7 +8,7 @@
   <style>
     .stats table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
     .stats th, .stats td { padding: 8px; border-bottom: 1px solid var(--line); text-align: right; }
-    .stats th:first-child, .stats td:first-child { text-align: left; }
+    .stats th:first-child, .stats td:first-child, #reviews td:nth-child(2) { text-align: left; }
     .stats th { color: var(--muted); font-weight: 600; font-size: 12px; }
   </style>
 </head>
@@ -27,19 +27,25 @@
         <h2>Weekly (from Monday)</h2>
         <div class="table"><table id="weekly"></table></div>
       </section>
+      <section class="stack">
+        <h2>Reviews</h2>
+        <div class="table"><table id="reviews"></table></div>
+      </section>
     </div>
   </main>
   <script>
     const HEADERS = ["Period", "New accounts", "Total accounts", "New applications", "Total applications"];
     const FIELDS = ["period", "accounts", "totalAccounts", "applications", "totalApplications"];
+    const REVIEW_HEADERS = ["Date", "Comment", "E-mail"];
+    const REVIEW_FIELDS = ["createdAt", "comment", "email"];
 
-    function fill(table, rows) {
+    function fill(table, rows, headers = HEADERS, fields = FIELDS) {
       table.replaceChildren();
       const head = table.insertRow();
-      HEADERS.forEach((text) => head.appendChild(document.createElement("th")).textContent = text);
+      headers.forEach((text) => head.appendChild(document.createElement("th")).textContent = text);
       rows.forEach((row) => {
         const tr = table.insertRow();
-        FIELDS.forEach((field) => tr.insertCell().textContent = row[field]);
+        fields.forEach((field) => tr.insertCell().textContent = row[field]);
       });
     }
 
@@ -58,6 +64,8 @@
       message.textContent = "Accounts and applications created per day and per week. Deleted applications are not counted.";
       fill(document.getElementById("daily"), data.daily);
       fill(document.getElementById("weekly"), data.weekly);
+      const reviews = await (await fetch("/api/reviews")).json();
+      fill(document.getElementById("reviews"), reviews, REVIEW_HEADERS, REVIEW_FIELDS);
     }
   </script>
   <script type="module" src="/static/auth.js"></script>

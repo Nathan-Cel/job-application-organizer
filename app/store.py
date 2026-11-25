@@ -1,4 +1,4 @@
-"""Stockage Firestore : candidatures et fichiers PDF.
+"""Stockage Firestore : candidatures, avis et fichiers PDF.
 
 Les PDF sont découpés en morceaux (un document par morceau) pour rester sous la limite
 de 1 Mio par document Firestore, sans passer par Cloud Storage (payant).
@@ -71,6 +71,16 @@ def list_account_dates() -> list[str]:
         page = body.get("nextPageToken")
         if not page:
             return dates
+
+
+# ---------- Avis ----------
+
+def create_review(data: dict) -> None:
+    _db().collection("reviews").document().set(data)
+
+
+def list_reviews() -> list[dict]:
+    return [d.to_dict() for d in _db().collection("reviews").stream()]
 
 
 # ---------- Fichiers ----------

@@ -23,12 +23,15 @@ const ICONS = {
   file: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/>',
   fileCheck: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/><path d="M9 13l2 2 4-4"/>',
   mail: '<path d="M3 5h18v14H3z"/><path d="M3 6l9 7 9-7"/>',
+  star: '<path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/>',
+  chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   link: '<path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1"/><path d="M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1"/>',
 };
 const GRIP = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="#9CA3AF">'
   + [6, 12, 18].map((y) => `<circle cx="9" cy="${y}" r="1.6"/><circle cx="15" cy="${y}" r="1.6"/>`).join("") + "</svg>";
 
 let userId; // undefined tant que Firebase n'a pas répondu, null si déconnecté
+let isAdmin = false;
 let apps = [];
 let appsLoaded = false;
 let rerender = () => {};
@@ -106,11 +109,15 @@ async function loadApps() {
 function renderNav() {
   const offers = location.hash.startsWith("#/offers");
   const agent = location.hash.startsWith("#/agent");
+  const review = location.hash.startsWith("#/review");
   const current = (on) => (on ? ' aria-current="page"' : "");
   document.getElementById("nav").innerHTML = userId ? `
-    <a href="#/"${current(!offers && !agent)}>${icon("inbox", 18)}<span class="grow">${t("nav.box")}</span><span class="count">${apps.length}</span></a>
+    <a href="#/"${current(!offers && !agent && !review)}>${icon("inbox", 18)}<span class="grow">${t("nav.box")}</span><span class="count">${apps.length}</span></a>
     <a href="#/offers"${current(offers)}>${icon("search", 18)}<span>${t("nav.offers")}</span></a>
     <a href="#/agent"${current(agent)}>${icon("link", 18)}<span>${t("nav.agent")}</span></a>
+    ${isAdmin
+      ? `<a href="/stats">${icon("chart", 18)}<span>${t("nav.stats")}</span></a>`
+      : `<a href="#/review"${current(review)}>${icon("star", 18)}<span>${t("nav.review")}</span></a>`}
     <a href="#/signout">${icon("back", 18)}<span>${t("nav.signOut")}</span></a>` : "";
   document.getElementById("lang").innerHTML = Object.keys(LOCALES)
     .map((code) => `<button type="button" data-lang="${code}" aria-pressed="${code === lang}">${code.toUpperCase()}</button>`)
@@ -138,6 +145,7 @@ function route() {
   }
   if (page === "offers") return showOfferSearch();
   if (page === "agent") return showAgent();
+  if (page === "review") return showReview();
   if (page === "new") return showNew();
   if (page === "a" && sub === "edit") return showEdit(id);
   if (page === "a") return showDetail(id);
@@ -874,6 +882,50 @@ async function showAgent() {
   }
 }
 
+// ---------- Avis ----------
+
+const REVIEW_FORM = () => `
+  <form class="login">
+    <label class="lbl"><span>${t("review.comment")}</span><textarea class="field" name="comment" required></textarea></label>
+    <button class="btn btn-primary">${t("review.send")}</button>
+    <p class="banner" role="status" hidden></p>
+  </form>`;
+
+async function sendReview(e) {
+  e.preventDefault();
+  const form = e.target;
+  const banner = form.querySelector(".banner");
+  try {
+    await api("/api/reviews", { method: "POST", body: { comment: form.elements.comment.value } });
+    form.reset();
+    banner.className = "banner success";
+    banner.textContent = t("review.thanks");
+  } catch (err) {
+    banner.className = "banner error";
+    banner.textContent = err.message;
+  }
+  banner.hidden = false;
+}
+
+function showReview() {
+  view.className = "list";
+  rerender = showReview;
+  view.innerHTML = `<h1>${t("nav.review")}</h1><p>${t("review.intro")}</p>${REVIEW_FORM()}`;
+  view.onsubmit = sendReview;
+}
+
+// Affichée après la connexion, pour les non-administrateurs.
+function showReviewPopup() {
+  const dialog = document.body.appendChild(document.createElement("dialog"));
+  dialog.className = "popup";
+  dialog.innerHTML = `
+    <button class="icon-btn" type="button" aria-label="${t("review.close")}" data-close>${icon("close")}</button>
+    <p>${t("review.popup")}</p>`;
+  dialog.onclick = (e) => { if (e.target.closest("[data-close]")) dialog.close(); };
+  dialog.onclose = () => dialog.remove();
+  dialog.showModal();
+}
+
 function showOfferSearch() {
   view.className = "list";
   rerender = renderOfferSearch;
@@ -960,7 +1012,13 @@ function onAuth(user) {
   userId = id;
   apps = [];
   appsLoaded = false;
+  isAdmin = false;
   route();
+  if (userId) api("/api/me").then((me) => {
+    isAdmin = me.admin;
+    renderNav();
+    if (!isAdmin) showReviewPopup();
+  }).catch(() => {});
   if (userId && location.hash.split("/")[1]) loadApps().catch(() => {}); // Box charge déjà la liste
 }
 

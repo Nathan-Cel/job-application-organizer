@@ -11,6 +11,7 @@ Application web pour suivre ses candidatures (emploi, stage, alternance). Chaque
 | **Création / modification** | Deux types : à une offre ou spontanée. Seules les bases sont obligatoires ; les sections (lien de l'offre, points clés, CV, lettre, échange, contact, section libre) s'ajoutent, se retirent et se réordonnent. Un **échange** (nom, coordonnée et plateforme obligatoires) contient une suite de messages datés ; on peut en ajouter plusieurs. **« Fetch and summarize »** lit la page de l'offre et l'IA (**Groq**) remplit les points clés ; un champ inconnu reste vide. |
 | **Offer search** | Recherche d'offres sur le web et via l'API France Travail ; « Track » crée une candidature à partir d'une offre. |
 | **AI agent** | Lien MCP personnel à ajouter comme connecteur personnalisé dans Claude, ChatGPT ou Le Chat : l'agent consulte, crée et modifie les candidatures (pas de suppression ni de fichier PDF). |
+| **Review** | Commentaire libre, visible par les administrateurs sur `/stats`. |
 
 ## Installation
 
@@ -80,7 +81,7 @@ firebase deploy --only hosting
 
 Pour France Travail, ajoute `FRANCE_TRAVAIL_CLIENT_ID` et `FRANCE_TRAVAIL_CLIENT_SECRET` de la même façon.
 
-La page `/stats` (comptes et candidatures créés par jour et par semaine) n'est ouverte qu'aux e-mails de `ADMIN_EMAILS` : garde-le dans `--set-env-vars`, qui remplace toutes les variables du service à chaque déploiement.
+La page `/stats` (comptes et candidatures créés par jour et par semaine, avis laissés dans l'onglet **Review**) n'est ouverte qu'aux e-mails de `ADMIN_EMAILS` : garde-le dans `--set-env-vars`, qui remplace toutes les variables du service à chaque déploiement.
 
 ## Tests
 
