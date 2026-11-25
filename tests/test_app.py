@@ -273,3 +273,10 @@ def test_reviews(client, monkeypatch):
     main.app.dependency_overrides[main._claims] = lambda: {"sub": "u2", "email": "admin@example.com"}
     [review] = client.get("/api/reviews").json()
     assert review["comment"] == "Add reminders" and review["email"] == "user@example.com"
+
+
+def test_delete_account(client, monkeypatch):
+    deleted = []
+    monkeypatch.setattr(store, "delete_user", deleted.append)
+    assert client.delete("/api/account").status_code == 204
+    assert deleted == ["u1"]

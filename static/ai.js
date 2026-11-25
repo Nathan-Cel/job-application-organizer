@@ -184,13 +184,24 @@ function renderProfile() {
     </div></section>
     ${p.notice ? `<p class="banner success" role="status">${esc(p.notice)}</p>` : ""}
     ${p.error ? `<p class="banner error" role="status">${esc(p.error)}</p>` : ""}
-    <div class="form-foot"><div class="actions"><a class="btn" href="#/signout">${t("nav.signOut")}</a>
+    <div class="form-foot"><div class="actions"><button class="btn btn-danger" type="button" data-action="delete-account">${t("profile.deleteAccount")}</button>
+      <a class="btn" href="#/signout">${t("nav.signOut")}</a>
       <button class="btn btn-primary" type="submit" ${p.saving ? "disabled" : ""}>${t("profile.save")}</button></div></div>
   </form>`;
   view.oninput = (e) => {
     if (e.target.dataset.key === "title") cvs[e.target.dataset.i].title = e.target.value;
   };
-  view.onclick = (e) => {
+  view.onclick = async (e) => {
+    if (e.target.closest("[data-action=delete-account]") && confirm(t("profile.confirmDeleteAccount"))) {
+      try {
+        await api("/api/account", { method: "DELETE" });
+        location.hash = "#/";
+        return authApi.signOut();
+      } catch (err) {
+        p.error = err.message;
+        return renderProfile();
+      }
+    }
     if (e.target.closest("[data-action=choose]")) view.querySelector("[data-cv-file]").click();
     const remove = e.target.closest("[data-action=remove-cv]");
     if (remove) {

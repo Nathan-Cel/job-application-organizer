@@ -149,6 +149,11 @@ def get_profile(uid: str = Depends(current_user)):
     return {"cvs": store.get_profile(uid).get("cvs", [])}
 
 
+@app.delete("/api/account", status_code=204)
+def delete_account(uid: str = Depends(current_user)):
+    store.delete_user(uid)
+
+
 @app.put("/api/profile")
 def put_profile(data: ProfileIn, uid: str = Depends(current_user)):
     """CV du profil : des PDF avec un titre, que l'IA ne lit pas."""

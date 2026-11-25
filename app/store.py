@@ -57,10 +57,16 @@ def list_application_dates() -> list[str]:
     return [d.get("createdAt") for d in _db().collection("applications").select(["createdAt"]).stream()]
 
 
-def list_account_dates() -> list[str]:
-    """Dates de création des comptes Firebase Auth, via l'API Identity Toolkit."""
+def _identity_toolkit() -> tuple[AuthorizedSession, str]:
+    """Session et adresse de l'API Identity Toolkit (comptes Firebase Auth) du projet."""
     session = AuthorizedSession(google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])[0])
-    url = f"https://identitytoolkit.googleapis.com/v1/projects/{os.getenv('FIREBASE_PROJECT_ID')}/accounts:batchGet"
+    return session, f"https://identitytoolkit.googleapis.com/v1/projects/{os.getenv('FIREBASE_PROJECT_ID')}/accounts"
+
+
+def list_account_dates() -> list[str]:
+    """Dates de création des comptes Firebase Auth."""
+    session, url = _identity_toolkit()
+    url += ":batchGet"
     dates, page = [], ""
     while True:
         response = session.get(url, params={"maxResults": 1000, "nextPageToken": page})
@@ -126,6 +132,20 @@ def get_profile(uid: str) -> dict:
 def save_profile(uid: str, data: dict) -> dict:
     _db().collection("profiles").document(uid).set(data, merge=True)
     return get_profile(uid)
+
+
+# ---------- Compte ----------
+
+def delete_user(uid: str) -> None:
+    """Supprime les candidatures, fichiers, profil et avis de la personne, puis son compte Firebase Auth."""
+    for collection in ("applications", "reviews"):
+        for doc in _db().collection(collection).where(filter=firestore.FieldFilter("uid", "==", uid)).stream():
+            doc.reference.delete()
+    for doc in _db().collection("files").where(filter=firestore.FieldFilter("uid", "==", uid)).stream():
+        delete_file(doc.id)
+    _db().collection("profiles").document(uid).delete()
+    session, url = _identity_toolkit()
+    session.post(f"{url}:delete", json={"localId": uid}).raise_for_status()
 
 
 # ---------- Événements (statistiques d'usage) ----------
