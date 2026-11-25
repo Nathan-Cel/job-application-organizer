@@ -1,12 +1,13 @@
 import asyncio
 import io
 import json
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app import jobs, llm, main, store, websearch
+from app import jobs, llm, main, stats, store, websearch
 
 
 @pytest.fixture
@@ -85,6 +86,51 @@ def test_application_validation(client):
     app_id = _new(client).json()["id"]
     body = {"type": "spontaneous", "company": "X", "status": "sent"}
     assert client.put(f"/api/applications/{app_id}", json=body).status_code == 400
+
+
+def test_conversation_needs_name_contact_platform(client):
+    conv = {"kind": "conversation", "name": "Maya", "handle": "maya@halden.example", "platform": "Outlook",
+            "messages": [{"date": "2026-11-04", "text": "Hello"}, {"date": "2026-11-06", "text": "Reply"}]}
+    assert _new(client, sections=[conv, conv]).status_code == 201
+    assert _new(client, sections=[conv | {"platform": " "}]).status_code == 400
+
+
+def test_old_email_section_becomes_conversation(client):
+    app_id = _new(client).json()["id"]
+    old = {"id": "s1", "kind": "email", "to": "hr@x.example", "sentAt": "Nov 4", "subject": "Hi", "body": "Text"}
+    main.store.update_application(app_id, {**main.store.get_application(app_id), "sections": [old]})
+    conv = client.get(f"/api/applications/{app_id}").json()["sections"][0]
+    assert conv == {"id": "s1", "kind": "conversation", "name": "", "handle": "hr@x.example", "platform": "E-mail",
+                    "messages": [{"date": "", "text": "Nov 4\n\nHi\n\nText"}]}
+
+
+def test_export_import_csv(client):
+    _new(client, sections=[{"kind": "offerLink", "url": "https://x.example/job"},
+                           {"kind": "contact", "name": "Maya", "email": "maya@x.example", "extra": []}])
+    exported = client.get("/api/export/csv")
+    assert exported.headers["content-type"].startswith("text/csv")
+    assert client.post("/api/import/csv", content=exported.content).json() == {"imported": 1}
+    copy = client.get("/api/applications").json()[1]
+    assert copy["company"] == "Halden Labs"
+    assert copy["sections"][0]["url"] == "https://x.example/job"
+    assert copy["sections"][1]["name"] == "Maya"
+
+    excel_fr = "company;status\nAéro;sent\n;\n".encode("cp1252")
+    assert client.post("/api/import/csv", content=excel_fr).json() == {"imported": 1}
+    resp = client.post("/api/import/csv", content=b"company,status\nX,unknown\n")
+    assert resp.status_code == 400 and resp.json()["detail"].startswith("Entry 1:")
+
+
+def test_export_import_json_keeps_dates_drops_files(client):
+    ref = client.post("/api/files", params={"name": "cv.pdf"}, content=_pdf()).json()
+    _new(client, status="sent", sections=[{"kind": "cv", "file": ref}])
+    exported = client.get("/api/export/json").json()
+    assert "uid" not in exported[0]
+    client.post("/api/import/json", json=exported)
+    copy = client.get("/api/applications").json()[1]
+    assert copy["sentAt"] == exported[0]["sentAt"]
+    assert copy["sections"] == [{"kind": "cv"}]
+    assert client.post("/api/import/json", content=b"{}").status_code == 400
 
 
 def test_pdf_upload_and_cleanup(client):
@@ -185,3 +231,43 @@ def test_fetch_page_refuses_local_addresses():
     for url in ("http://localhost:8000/", "http://127.0.0.1/", "http://192.168.1.1/", "file:///etc/passwd"):
         with pytest.raises(websearch.WebSearchError):
             asyncio.run(websearch.fetch_page(url))
+
+
+def test_stats_evolution():
+    result = stats.evolution(["2026-11-16T10:00:00+00:00", "2026-11-18T08:00:00+00:00"],
+                             ["2026-11-15T17:00:00+00:00", "2026-11-18T09:00:00+00:00", "2026-11-18T10:00:00+00:00"],
+                             date(2026, 11, 18))
+    assert [r["period"] for r in result["daily"]] == ["2026-11-18", "2026-11-17", "2026-11-16", "2026-11-15"]
+    assert result["daily"][0] == {"period": "2026-11-18", "accounts": 1, "totalAccounts": 2,
+                                  "applications": 2, "totalApplications": 3}
+    assert result["daily"][1]["accounts"] == 0
+    assert result["weekly"] == [
+        {"period": "2026-11-16", "accounts": 2, "totalAccounts": 2, "applications": 2, "totalApplications": 3},
+        {"period": "2026-11-09", "accounts": 0, "totalAccounts": 0, "applications": 1, "totalApplications": 1},
+    ]
+
+
+def test_stats_admins_only(client, monkeypatch):
+    monkeypatch.setattr(store, "list_account_dates", lambda: [])
+    monkeypatch.setattr(store, "list_application_dates", lambda: [])
+    monkeypatch.setenv("ADMIN_EMAILS", "Admin@example.com, other@example.com")
+    main.app.dependency_overrides[main._claims] = lambda: {"sub": "u1", "email": "user@example.com"}
+    assert client.get("/api/stats").status_code == 403
+    main.app.dependency_overrides[main._claims] = lambda: {"sub": "u1", "email": "admin@example.com"}
+    assert client.get("/api/stats").json() == {"daily": [], "weekly": []}
+
+
+def test_reviews(client, monkeypatch):
+    reviews = []
+    monkeypatch.setattr(store, "create_review", reviews.append)
+    monkeypatch.setattr(store, "list_reviews", lambda: reviews)
+    monkeypatch.setenv("ADMIN_EMAILS", "admin@example.com")
+    main.app.dependency_overrides[main._claims] = lambda: {"sub": "u1", "email": "user@example.com"}
+    assert client.post("/api/reviews", json={"comment": ""}).status_code == 422
+    assert client.post("/api/reviews", json={"comment": "Add reminders"}).status_code == 201
+    assert client.get("/api/reviews").status_code == 403
+    assert client.get("/api/me").json() == {"admin": False}
+    main.app.dependency_overrides[main._claims] = lambda: {"sub": "u2", "email": "admin@example.com"}
+    assert client.get("/api/me").json() == {"admin": True}
+    [review] = client.get("/api/reviews").json()
+    assert review["comment"] == "Add reminders" and review["email"] == "user@example.com"

@@ -6,4 +6,5 @@ google-cloud-firestore>=2.16
 google-auth[requests]>=2.0
 pypdfium2>=4.30
 pillow>=10.0
+fastmcp>=4.2
 pytest>=8.0

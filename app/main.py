@@ -1,8 +1,11 @@
 """Helper : centre de suivi des candidatures."""
 
 import asyncio
+import csv
 import io
+import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
@@ -14,16 +17,20 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError
 
 load_dotenv()
 
-from . import jobs, llm, offer, store, websearch  # noqa: E402  (après load_dotenv)
+from . import jobs, llm, offer, stats, store, websearch  # noqa: E402  (après load_dotenv)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 MAX_FILE_BYTES = 10_000_000
-SECTION_KINDS = {"offerLink", "keyPoints", "company", "cv", "letter", "email", "contact", "custom"}
+SECTION_KINDS = {"offerLink", "keyPoints", "company", "cv", "letter", "conversation", "contact", "custom"}
 OFFER_KINDS = {"offerLink", "keyPoints"}
+CONVERSATION_REQUIRED = ("name", "handle", "platform")
+DATE_KEYS = ("createdAt", "lastStatusChangeAt", "sentAt")
+CONTACT_COLUMNS = {"contactName": "name", "contactPosition": "position", "contactEmail": "email", "contactPhone": "phone"}
+CSV_COLUMNS = ["company", "jobTitle", "type", "status", "offerUrl", *CONTACT_COLUMNS, "lastStatusChangeAt", "sentAt"]
 
 app = FastAPI(title="Helper")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -37,6 +44,10 @@ class ApplicationIn(BaseModel):
     sections: list[dict] = []
 
 
+class ReviewIn(BaseModel):
+    comment: str = Field(min_length=1)
+
+
 class OfferRequest(BaseModel):
     url: str = ""
     text: str = ""
@@ -48,14 +59,58 @@ def index():
     return FileResponse(STATIC_DIR / "index.html")
 
 
-def current_user(session: str = Cookie("", alias="__session")) -> str:
+def _claims(session: str = Cookie("", alias="__session")) -> dict:
     """Vérifie le jeton Firebase du cookie __session (seul cookie transmis par Firebase Hosting)."""
     try:
-        claims = id_token.verify_firebase_token(session, google_requests.Request(),
-                                                audience=os.getenv("FIREBASE_PROJECT_ID"))
+        return id_token.verify_firebase_token(session, google_requests.Request(),
+                                              audience=os.getenv("FIREBASE_PROJECT_ID"))
     except ValueError as exc:
         raise HTTPException(status_code=401, detail="Please sign in.") from exc
+
+
+def current_user(claims: dict = Depends(_claims)) -> str:
     return claims["sub"]
+
+
+def _is_admin(claims: dict) -> bool:
+    admins = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
+    return claims.get("email", "").lower() in admins
+
+
+def admin_user(claims: dict = Depends(_claims)) -> None:
+    if not _is_admin(claims):
+        raise HTTPException(status_code=403, detail="Administrators only.")
+
+
+@app.get("/api/me")
+def me(claims: dict = Depends(_claims)):
+    return {"admin": _is_admin(claims)}
+
+
+# ---------- Statistiques ----------
+
+@app.get("/stats")
+def stats_page():
+    return FileResponse(STATIC_DIR / "stats.html")
+
+
+@app.get("/api/stats", dependencies=[Depends(admin_user)])
+def get_stats():
+    return stats.evolution(store.list_account_dates(), store.list_application_dates(),
+                           datetime.now(timezone.utc).date())
+
+
+# ---------- Avis ----------
+
+@app.post("/api/reviews", status_code=201)
+def create_review(data: ReviewIn, claims: dict = Depends(_claims)):
+    store.create_review({**data.model_dump(), "uid": claims["sub"], "email": claims.get("email", ""),
+                         "createdAt": store.now()})
+
+
+@app.get("/api/reviews", dependencies=[Depends(admin_user)])
+def list_reviews():
+    return sorted(store.list_reviews(), key=lambda r: r["createdAt"], reverse=True)
 
 
 # ---------- Candidatures ----------
@@ -69,6 +124,25 @@ def _validate(data: ApplicationIn) -> None:
             raise HTTPException(status_code=400, detail=f"Unknown section: {kind}")
         if data.type == "spontaneous" and kind in OFFER_KINDS:
             raise HTTPException(status_code=400, detail="A spontaneous application has no job offer.")
+        if kind == "conversation" and not all(str(section.get(k) or "").strip() for k in CONVERSATION_REQUIRED):
+            raise HTTPException(status_code=400, detail="A conversation needs a name, a contact and a platform.")
+
+
+def _upgrade(sections: list[dict]) -> list[dict]:
+    """Convertit les anciennes sections « email » en conversations."""
+    def convert(s: dict) -> dict:
+        text = "\n\n".join(v for v in (s.get("sentAt"), s.get("subject"), s.get("body")) if v)
+        return {"id": s.get("id"), "kind": "conversation", "name": "", "handle": s.get("to", ""),
+                "platform": "E-mail", "messages": [{"date": "", "text": text}] if text else []}
+    return [convert(s) if s.get("kind") == "email" else s for s in sections]
+
+
+def _new_record(data: ApplicationIn, uid: str, dates: dict | None = None) -> dict:
+    now = store.now()
+    record = {**data.model_dump(), "uid": uid, "createdAt": now, "lastStatusChangeAt": now}
+    if data.status != "notsent":
+        record["sentAt"] = now
+    return record | (dates or {})
 
 
 def _file_ids(sections: list[dict]) -> set[str]:
@@ -83,7 +157,7 @@ def _delete_files(file_ids: set[str], uid: str) -> None:
 
 @app.get("/api/applications")
 def list_applications(uid: str = Depends(current_user)):
-    return store.list_applications(uid)
+    return [{**a, "sections": _upgrade(a["sections"])} for a in store.list_applications(uid)]
 
 
 @app.get("/api/applications/{app_id}")
@@ -91,17 +165,13 @@ def get_application(app_id: str, uid: str = Depends(current_user)):
     application = store.get_application(app_id)
     if application is None or application.get("uid") != uid:
         raise HTTPException(status_code=404, detail="Application not found.")
-    return application
+    return {**application, "sections": _upgrade(application["sections"])}
 
 
 @app.post("/api/applications", status_code=201)
 def create_application(data: ApplicationIn, uid: str = Depends(current_user)):
     _validate(data)
-    now = store.now()
-    record = {**data.model_dump(), "uid": uid, "createdAt": now, "lastStatusChangeAt": now}
-    if data.status != "notsent":
-        record["sentAt"] = now
-    return store.create_application(record)
+    return store.create_application(_new_record(data, uid))
 
 
 @app.put("/api/applications/{app_id}")
@@ -125,6 +195,85 @@ def delete_application(app_id: str, uid: str = Depends(current_user)):
     application = get_application(app_id, uid)
     _delete_files(_file_ids(application["sections"]), uid)
     store.delete_application(app_id)
+
+
+# ---------- Import / export ----------
+
+def _csv_row(application: dict) -> dict:
+    link = next((s for s in application["sections"] if s["kind"] == "offerLink"), {})
+    contact = next((s for s in application["sections"] if s["kind"] == "contact"), {})
+    return ({k: application.get(k, "") for k in ("company", "jobTitle", "type", "status", "lastStatusChangeAt", "sentAt")}
+            | {"offerUrl": link.get("url", "")}
+            | {col: contact.get(key, "") for col, key in CONTACT_COLUMNS.items()})
+
+
+def _from_csv_row(row: dict) -> dict:
+    sections = []
+    if row.get("offerUrl"):
+        sections.append({"kind": "offerLink", "url": row["offerUrl"]})
+    contact = {key: row.get(col, "") for col, key in CONTACT_COLUMNS.items()}
+    if any(contact.values()):
+        sections.append({"kind": "contact", **contact, "extra": []})
+    return {"company": row.get("company", ""), "jobTitle": row.get("jobTitle", ""),
+            "type": row.get("type") or "regular", "status": row.get("status") or "notsent", "sections": sections}
+
+
+def _read_csv(text: str) -> list[dict]:
+    """Lit un CSV séparé par des virgules ou des points-virgules (Excel en français)."""
+    header = text.split("\n", 1)[0]
+    delimiter = ";" if header.count(";") > header.count(",") else ","
+    rows = [{k.strip(): (v or "").strip() for k, v in row.items() if isinstance(k, str)}
+            for row in csv.DictReader(io.StringIO(text), delimiter=delimiter)]
+    return [_from_csv_row(row) for row in rows if any(row.values())]
+
+
+@app.get("/api/export/{fmt}")
+def export_applications(fmt: Literal["csv", "json"], uid: str = Depends(current_user)):
+    applications = [{k: v for k, v in a.items() if k not in ("id", "uid")} for a in list_applications(uid)]
+    if fmt == "json":
+        content = json.dumps(applications, ensure_ascii=False, indent=2)
+    else:
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, CSV_COLUMNS)
+        writer.writeheader()
+        writer.writerows(_csv_row(a) for a in applications)
+        content = "﻿" + buffer.getvalue()  # BOM : Excel lit alors les accents correctement
+    media = "application/json" if fmt == "json" else "text/csv"
+    return Response(content, media_type=f"{media}; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="applications.{fmt}"'})
+
+
+@app.post("/api/import/{fmt}")
+async def import_applications(fmt: Literal["csv", "json"], request: Request, uid: str = Depends(current_user)):
+    raw = await request.body()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1252")  # CSV enregistré par Excel sans l'option UTF-8
+    try:
+        items = json.loads(text) if fmt == "json" else _read_csv(text)
+    except (json.JSONDecodeError, csv.Error) as exc:
+        raise HTTPException(status_code=400, detail="This file cannot be read.") from exc
+    if not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="This file cannot be read.")
+    records = []
+    for n, item in enumerate(items, 1):
+        try:
+            data = ApplicationIn.model_validate(item)
+            # Les PDF ne font pas partie de l'export : on retire les références aux fichiers.
+            data.sections = [{k: v for k, v in s.items() if k != "file"} for s in _upgrade(data.sections)]
+            _validate(data)
+        except ValidationError as exc:
+            error = exc.errors()[0]
+            raise HTTPException(status_code=400,
+                                detail=f"Entry {n}: {'.'.join(map(str, error['loc']))}: {error['msg']}") from exc
+        except HTTPException as exc:
+            raise HTTPException(status_code=400, detail=f"Entry {n}: {exc.detail}") from exc
+        dates = {k: item[k] for k in DATE_KEYS if fmt == "json" and item.get(k)}
+        records.append(_new_record(data, uid, dates))
+    for record in records:
+        store.create_application(record)
+    return {"imported": len(records)}
 
 
 # ---------- Fichiers PDF ----------
@@ -212,3 +361,15 @@ async def search_jobs(q: str = "", location: str = "", department: str = "", kin
 
     await asyncio.gather(from_france_travail(), from_web())
     return result
+
+
+# ---------- MCP (agents) ----------
+
+from . import mcp_server  # noqa: E402  (monte /mcp/{key} ; importé en dernier car il importe main)
+
+
+@app.get("/api/mcp/link")
+def mcp_link(uid: str = Depends(current_user)):
+    if not os.getenv("MCP_SECRET"):
+        raise HTTPException(status_code=503, detail="The MCP server is not configured.")
+    return {"path": f"/mcp/{mcp_server.key_for(uid)}"}
