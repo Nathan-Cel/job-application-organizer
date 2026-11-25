@@ -28,7 +28,6 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 MAX_FILE_BYTES = 10_000_000
 SECTION_KINDS = {"offerLink", "keyPoints", "company", "cv", "letter", "conversation", "contact", "custom"}
 OFFER_KINDS = {"offerLink", "keyPoints"}
-PROFILE_FIELDS = ("name", "target", "location", "skills", "cv")
 Lang = Literal["fr", "en"]
 CONVERSATION_REQUIRED = ("name", "handle", "platform")
 DATE_KEYS = ("createdAt", "lastStatusChangeAt", "sentAt")
@@ -54,11 +53,7 @@ class OfferRequest(BaseModel):
 
 
 class ProfileIn(BaseModel):
-    name: str = ""
-    target: str = ""
-    location: str = ""
-    skills: str = ""
-    cv: str = ""
+    cvs: list[dict] = []
 
 
 class ReplyRequest(BaseModel):
@@ -147,36 +142,24 @@ def _ms(started: float) -> int:
 
 @app.get("/api/me")
 def me(uid: str = Depends(current_user), admin: bool = Depends(is_admin)):
-    profile = store.get_profile(uid)
-    return {
-        "uid": uid, "admin": admin,
-        "profileFilled": bool((profile.get("cv") or "").strip() or (profile.get("skills") or "").strip()),
-        "llm": llm.is_configured(),
-    }
+    return {"uid": uid, "admin": admin, "llm": llm.is_configured()}
 
 
 @app.get("/api/profile")
 def get_profile(uid: str = Depends(current_user)):
-    profile = store.get_profile(uid)
-    return {f: profile.get(f, "") for f in PROFILE_FIELDS}
+    return {"cvs": store.get_profile(uid).get("cvs", [])}
 
 
 @app.put("/api/profile")
 def put_profile(data: ProfileIn, uid: str = Depends(current_user)):
-    saved = store.save_profile(uid, data.model_dump())
-    analytics.capture(uid, "profile_saved", {"has_cv": bool(data.cv.strip()), "has_skills": bool(data.skills.strip())})
-    return {f: saved.get(f, "") for f in PROFILE_FIELDS}
-
-
-@app.post("/api/profile/cv-text")
-async def cv_text_from_pdf(request: Request, uid: str = Depends(current_user)):
-    """Extrait le texte d'un CV en PDF pour remplir le profil (le PDF n'est pas gardé)."""
-    content = await request.body()
-    if len(content) > MAX_FILE_BYTES:
-        raise HTTPException(status_code=413, detail="The file is larger than 10 MB.")
-    text = _pdf_text(content)
-    analytics.capture(uid, "cv_imported", {"chars": len(text)})
-    return {"text": text}
+    """CV du profil : des PDF avec un titre, que l'IA ne lit pas."""
+    if not all(cv.get("title", "").strip() and (cv.get("file") or {}).get("id") for cv in data.cvs):
+        raise HTTPException(status_code=400, detail="Each CV needs a title and a PDF.")
+    old = store.get_profile(uid).get("cvs", [])
+    saved = store.save_profile(uid, {"cvs": data.cvs})
+    _delete_files(_file_ids(old) - _file_ids(data.cvs), uid)
+    analytics.capture(uid, "profile_saved", {"cvs": len(data.cvs)})
+    return {"cvs": saved.get("cvs", [])}
 
 
 # ---------- Candidatures ----------
@@ -300,8 +283,8 @@ async def recruiter_reply(req: ReplyRequest, uid: str = Depends(current_user)):
             "prepare": info["type_reponse"] in replies.PREPARE_FOR}
 
 
-def _cv_for(record: dict, uid: str, profile: dict) -> str:
-    """CV envoyé pour cette candidature (PDF de la section CV) s'il existe, sinon celui du profil."""
+def _cv_for(record: dict, uid: str) -> str:
+    """Texte du CV envoyé pour cette candidature (PDF de la section CV), vide s'il n'y en a pas."""
     file_id = (replies.section(record, "cv").get("file") or {}).get("id")
     found = store.get_file(file_id) if file_id else None
     if found and found[0].get("uid") == uid:
@@ -311,7 +294,7 @@ def _cv_for(record: dict, uid: str, profile: dict) -> str:
                 return text
         except HTTPException:
             pass
-    return profile.get("cv", "")
+    return ""
 
 
 @app.post("/api/applications/{app_id}/prep")
@@ -322,8 +305,7 @@ async def interview_prep(app_id: str, req: PrepRequest, uid: str = Depends(curre
     if fetched:  # on garde le texte lu pour les prochaines préparations
         link = replies.section(record, "offerLink")
         link["rawText"] = fetched
-    profile = store.get_profile(uid)
-    profile = {**profile, "cv": _cv_for(record, uid, profile)}
+    profile = {"cv": _cv_for(record, uid)}
     try:
         text, steps = await replies.prepare(record, profile, req.lang)
     except llm.LLMError as exc:
@@ -343,7 +325,7 @@ async def interview_prep(app_id: str, req: PrepRequest, uid: str = Depends(curre
 async def chat(req: ChatRequest, uid: str = Depends(current_user)):
     started = time.monotonic()
     try:
-        result = await agent.run(store.get_profile(uid), req.messages, req.lang)
+        result = await agent.run({}, req.messages, req.lang)
     except llm.LLMError as exc:
         _ai_error(uid, "chat_message", started, exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -355,7 +337,7 @@ async def chat(req: ChatRequest, uid: str = Depends(current_user)):
 @app.post("/api/write")
 async def write(req: WriteRequest, uid: str = Depends(current_user)):
     """Lettre de motivation, analyse de CV ou e-mail au recruteur."""
-    profile = store.get_profile(uid)
+    profile = {}  # le profil ne contient plus que des CV en PDF, que l'IA ne lit pas
     if req.kind == "letter":
         if not req.offer.strip():
             raise HTTPException(status_code=400, detail="Paste the job offer.")
@@ -611,7 +593,7 @@ async def spontaneous_application(req: SpontaneousIn, uid: str = Depends(current
     started = time.monotonic()
     company = {**req.company, "what": req.what, "description": req.description}
     try:
-        email = await companies.write_application(store.get_profile(uid), company, req.lang)
+        email = await companies.write_application({}, company, req.lang)
     except llm.LLMError as exc:
         _ai_error(uid, "spontaneous_written", started, exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc

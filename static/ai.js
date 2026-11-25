@@ -135,7 +135,7 @@ async function suggestLetter(s) {
 
 // ---------- Profil ----------
 
-const profileState = { data: null, saving: false, notice: "", error: "", importing: false };
+const profileState = { data: null, saving: false, notice: "", error: "" };
 
 async function showProfile() {
   view.className = "";
@@ -150,29 +150,32 @@ async function showProfile() {
   renderProfile();
 }
 
+// Un CV du profil : titre, puis le PDF enregistré ou en attente d'envoi (_pending).
+function cvRow(cv, i) {
+  const f = cv._pending ? { name: cv._pending.name } : cv.file;
+  const meta = cv._pending ? t("form.fileReady") : `${pagesLabel(f.pages)} · ${t("file.added", { date: fmtDate(f.addedAt) })}`;
+  return `<div class="fields">
+      ${input("title", t("profile.cvTitle"), { value: cv.title, attrs: `required data-i="${i}"` })}
+      <button class="icon-btn boxed" type="button" aria-label="${t("profile.removeCv")}" data-action="remove-cv" data-i="${i}">${icon("close", 16, 'stroke="currentColor" stroke-width="2"')}</button></div>
+    <div class="file-row">${icon("file", 22, 'stroke="#4B5563" stroke-width="1.5"')}
+      <div><span class="file-name">${esc(f.name)}</span><span class="file-meta">${meta}</span></div>
+      ${cv._pending ? "" : `<a class="btn" href="${fileUrl(cv.file)}" target="_blank" rel="noopener">${t("file.open")}</a>`}</div>`;
+}
+
 function renderProfile() {
   const p = profileState;
   if (!p.data) {
     view.innerHTML = p.error ? `<p class="banner error">${esc(p.error)}</p>` : "";
     return;
   }
-  const d = p.data;
+  const cvs = p.data.cvs;
   view.innerHTML = `<form class="narrow" id="profile-form">
     <header class="stack"><h1>${t("nav.profile")}</h1><p class="lead">${t("profile.lead")}</p></header>
-    <section class="mod"><div class="mod-head"><h2>${t("profile.about")}</h2></div><div class="mod-body">
-      <p class="help">${t("profile.aboutHelp")}</p>
-      <div class="fields">
-        ${input("name", t("form.name"), { value: d.name })}
-        ${input("target", t("profile.target"), { value: d.target, ph: t("profile.targetPh") })}
-        ${input("location", t("profile.location"), { value: d.location, ph: t("profile.locationPh") })}
-      </div>
-      ${input("skills", t("profile.skills"), { value: d.skills, ph: t("profile.skillsPh"), area: 3 })}
-    </div></section>
     <section class="mod"><div class="mod-head"><h2>${t("profile.cv")}</h2></div><div class="mod-body">
-      <div class="drop">${icon("upload", 22, 'stroke="#4B5563" stroke-width="1.5"')}<span>${t(p.importing ? "profile.importing" : "profile.import")}</span>
+      ${cvs.map(cvRow).join('<div class="rule"></div>')}
+      <div class="drop">${icon("upload", 22, 'stroke="#4B5563" stroke-width="1.5"')}<span>${t("profile.addCv")}</span>
         <input type="file" accept="application/pdf" hidden data-cv-file>
-        <button class="btn" type="button" data-action="choose" ${p.importing ? "disabled" : ""}>${t("form.chooseFile")}</button></div>
-      ${input("cv", t("profile.cvText"), { value: d.cv, ph: t("profile.cvPh"), area: 12 })}
+        <button class="btn" type="button" data-action="choose">${t("form.chooseFile")}</button></div>
     </div></section>
     <section class="mod"><div class="mod-head"><h2>${t("profile.language")}</h2></div><div class="mod-body">
       <div class="fields"><select class="field" data-lang-select aria-label="${t("profile.language")}">
@@ -185,38 +188,39 @@ function renderProfile() {
       <button class="btn btn-primary" type="submit" ${p.saving ? "disabled" : ""}>${t("profile.save")}</button></div></div>
   </form>`;
   view.oninput = (e) => {
-    if (e.target.dataset.key) d[e.target.dataset.key] = e.target.value;
+    if (e.target.dataset.key === "title") cvs[e.target.dataset.i].title = e.target.value;
   };
   view.onclick = (e) => {
     if (e.target.closest("[data-action=choose]")) view.querySelector("[data-cv-file]").click();
+    const remove = e.target.closest("[data-action=remove-cv]");
+    if (remove) {
+      cvs.splice(Number(remove.dataset.i), 1);
+      renderProfile();
+    }
   };
-  view.onchange = async (e) => {
+  view.onchange = (e) => {
     if (e.target.dataset.langSelect !== undefined) {
       setLang(e.target.value);
       track("lang_changed", { to: e.target.value });
       renderNav();
       return renderProfile();
     }
-    if (e.target.dataset.cvFile === undefined || !e.target.files[0]) return;
-    Object.assign(p, { importing: true, error: "", notice: "" });
-    renderProfile();
-    try {
-      const { text } = await api("/api/profile/cv-text", { method: "POST", body: e.target.files[0] });
-      d.cv = text;
-      p.notice = t(text ? "profile.imported" : "profile.importEmpty");
-    } catch (err) {
-      p.error = err.message;
-    }
-    p.importing = false;
+    const file = e.target.dataset.cvFile !== undefined && e.target.files[0];
+    if (!file) return;
+    cvs.push({ title: file.name.replace(/\.pdf$/i, ""), _pending: file });
     renderProfile();
   };
   view.onsubmit = async (e) => {
     e.preventDefault();
     Object.assign(p, { saving: true, error: "", notice: "" });
+    renderProfile();
     try {
-      p.data = await api("/api/profile", { method: "PUT", body: d });
+      for (const cv of cvs.filter((c) => c._pending)) {
+        cv.file = await api(`/api/files?name=${encodeURIComponent(cv._pending.name)}`, { method: "POST", body: cv._pending });
+        delete cv._pending;
+      }
+      p.data = await api("/api/profile", { method: "PUT", body: { cvs } });
       p.notice = t("profile.saved");
-      if (me) me.profileFilled = Boolean(d.cv.trim() || d.skills.trim());
     } catch (err) {
       p.error = err.message;
     }

@@ -191,11 +191,10 @@ def test_contact_and_application_endpoints(client, monkeypatch):  # noqa: F811
         return json.dumps({"objet": "Candidature spontanée", "corps": "Bonjour…"})
 
     monkeypatch.setattr(llm, "chat", fake_chat)
-    client.put("/api/profile", json={"cv": "Stage chez Bike&Co"})
     data = client.post("/api/companies/application", json={
         "company": {"name": "Agence Lumen", "city": "Lille", "activityLabel": "Agences de publicité"},
         "what": "alternance marketing", "description": "Agence de communication digitale", "lang": "en"}).json()
     assert data == {"subject": "Candidature spontanée", "body": "Bonjour…"}
     system, user = prompts_seen[0][0]["content"], prompts_seen[0][-1]["content"]
-    assert "Bike&Co" in system and "Agence Lumen" in user and "communication digitale" in user
+    assert "Aucun profil" in system and "Agence Lumen" in user and "communication digitale" in user
     assert user.endswith("Always answer in English.")

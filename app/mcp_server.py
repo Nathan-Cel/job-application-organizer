@@ -29,7 +29,8 @@ Sections are objects with a "kind" and the fields of that kind (all text unless 
 - company: summary (what the company does), why (why the user chose this company)
 - letter: text (cover letter)
 - conversation: name, handle (email, phone number, username…), platform (Outlook, LinkedIn, WhatsApp…),
-  messages (list of {"date": "YYYY-MM-DD", "text"}); name, handle and platform are required.
+  messages (list of {"date": "YYYY-MM-DD", "from": "them" or "me", "text"}; "them" is the person named in the
+  conversation, "me" is the user); name, handle and platform are required.
   An application can have several conversations. To add a message, send the conversation's id
   with its full messages list.
 - contact: name, position, email, phone, extra (list of {"label", "value"})

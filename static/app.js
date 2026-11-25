@@ -5,7 +5,7 @@ const SECTION_KINDS = ["offerLink", "keyPoints", "company", "cv", "letter", "con
 const REPEATABLE = ["conversation", "custom"];
 const DEFAULT_SECTIONS = { regular: ["offerLink", "keyPoints", "cv"], spontaneous: ["cv"] };
 const CONVERSATION_REQUIRED = ["name", "handle", "platform"];
-const NEW_ITEM = { extra: { label: "", value: "" }, messages: { date: "", text: "" } };
+const NEW_ITEM = { extra: { label: "", value: "" }, messages: { date: "", from: "them", text: "" } };
 const KEY_FIELDS = ["contract", "salary", "workMode", "experience", "start"];
 const KEY_LISTS = ["responsibilities", "requirements"];
 
@@ -34,7 +34,7 @@ const GRIP = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24"
   + [6, 12, 18].map((y) => `<circle cx="9" cy="${y}" r="1.6"/><circle cx="15" cy="${y}" r="1.6"/>`).join("") + "</svg>";
 
 let userId; // undefined tant que Firebase n'a pas répondu, null si déconnecté
-let me = null; // { uid, admin, profileFilled, llm } renvoyé par /api/me
+let me = null; // { uid, admin, llm } renvoyé par /api/me
 let apps = [];
 let appsLoaded = false;
 let rerender = () => {};
@@ -442,9 +442,14 @@ function conversationCards(app, main = false) {
   return app.sections.filter((s) => s.kind === "conversation").map((s, i) => {
     const who = `<div class="mail-meta${main ? " inline" : ""}"><span>${esc(s.name)}</span><div>${esc(s.platform)}: <span>${esc(s.handle)}</span></div></div>`;
     const messages = (s.messages || []).filter((m) => m.text).map((m) => `<div class="rule"></div>
-      ${m.date ? `<div class="micro">${fmtDate(m.date)}</div>` : ""}<div class="prose${main ? " big" : ""}">${paras(m.text)}</div>`).join("");
+      <div class="micro">${m.date ? `${fmtDate(m.date)} · ` : ""}${esc(sender(s, m.from))}</div><div class="prose${main ? " big" : ""}">${paras(m.text)}</div>`).join("");
     return card(t("section.conversation"), who + (messages ? `<div class="clamp">${messages}</div>` : ""), { cls: main ? "key" : "", key: `conv${i}` });
   }).join("");
+}
+
+// Auteur d'un message : la personne de la conversation ou l'utilisateur.
+function sender(conversation, from) {
+  return from === "me" ? t("conv.me") : conversation.name || t("conv.them");
 }
 
 function letterCard(s) {
@@ -656,6 +661,8 @@ function sectionBody(s) {
         ${s.messages.map((m, i) => `<div class="rule"></div>
           <div class="fields">
             ${input("date", t("form.date"), { type: "date", value: m.date, sec: id, attrs: `data-list="messages" data-i="${i}"` })}
+            <label class="lbl"><span>${t("form.from")}</span><select class="field" data-key="from" data-sec="${id}" data-list="messages" data-i="${i}">
+              ${["them", "me"].map((v) => `<option value="${v}" ${m.from === v ? "selected" : ""}>${esc(sender(s, v))}</option>`).join("")}</select></label>
             ${removeItemButton(id, "messages", i, t("form.removeMessage"))}</div>
           ${input("text", t("form.message"), { value: m.text, sec: id, ph: t("ph.message"), area: 4, attrs: `data-list="messages" data-i="${i}"` })}`).join("")}
         <div>${addItemButton(id, "messages", t("form.addMessage"))}</div>`;

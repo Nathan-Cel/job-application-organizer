@@ -160,26 +160,26 @@ def test_chat_and_write(client, monkeypatch):  # noqa: F811
 
     monkeypatch.setattr(llm, "complete", fake_complete)
     monkeypatch.setattr(llm, "chat", fake_chat)
-    client.put("/api/profile", json={"target": "alternance marketing"})
     data = client.post("/api/chat", json={"messages": [{"role": "user", "content": "Salut"}], "lang": "fr"}).json()
     assert data["text"] == "Réponse"
-    assert "alternance marketing" in seen[0][0]["content"] and "français" in seen[0][0]["content"]
+    assert "français" in seen[0][0]["content"]
 
     assert client.post("/api/write", json={"kind": "letter", "offer": " "}).status_code == 400
     assert client.post("/api/write", json={"kind": "letter", "offer": "Data engineer", "lang": "en"}).json() == {"text": "Texte"}
     assert "Always answer in English" in seen[-1][0]["content"]
-    assert client.post("/api/write", json={"kind": "cv"}).status_code == 400  # pas de CV dans le profil
-    client.put("/api/profile", json={"cv": "Mon CV"})
-    assert client.post("/api/write", json={"kind": "cv"}).status_code == 200
+    assert client.post("/api/write", json={"kind": "cv"}).status_code == 400  # l'IA ne lit pas les CV du profil
     assert client.post("/api/write", json={"kind": "email", "goal": "thanks", "received": "Merci"}).status_code == 200
     assert client.post("/api/write", json={"kind": "email", "goal": "unknown"}).status_code == 400
 
 
-def test_profile_roundtrip_and_cv_import(client, monkeypatch):  # noqa: F811
-    assert client.get("/api/profile").json()["name"] == ""
-    client.put("/api/profile", json={"name": "Alex", "skills": "SQL"})
-    assert client.get("/api/profile").json()["skills"] == "SQL"
+def test_profile_cvs(client):  # noqa: F811
+    assert client.get("/api/profile").json() == {"cvs": []}
+    file = client.post("/api/files?name=cv.pdf", content=_pdf()).json()
+    assert client.put("/api/profile", json={"cvs": [{"title": " ", "file": file}]}).status_code == 400
+    cvs = [{"title": "CV data", "file": file}]
+    assert client.put("/api/profile", json={"cvs": cvs}).json() == {"cvs": cvs}
+    assert client.get("/api/profile").json() == {"cvs": cvs}
+    client.put("/api/profile", json={"cvs": []})
+    assert file["id"] not in client.files  # le PDF retiré du profil est supprimé
     me = client.get("/api/me").json()
-    assert me["uid"] == "u1" and me["profileFilled"] is True and me["admin"] is False
-    assert "text" in client.post("/api/profile/cv-text", content=_pdf()).json()
-    assert client.post("/api/profile/cv-text", content=b"not a pdf").status_code == 400
+    assert me["uid"] == "u1" and me["admin"] is False
