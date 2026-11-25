@@ -141,6 +141,13 @@ def test_find_contact(monkeypatch):
     ]  # l'adresse gmail et les adresses parasites sont écartées
     assert "communication digitale" in found["description"] and found["pages"] == 3
 
+    async def no_search(query, max_results=8, domains=()):
+        raise AssertionError("le site est déjà connu")
+
+    monkeypatch.setattr(websearch, "search", no_search)
+    again = asyncio.run(companies.find_contact("Agence Lumen", "Lille", "https://www.agence-lumen.fr/"))
+    assert again["emails"] == found["emails"]
+
 
 def test_find_contact_without_website(monkeypatch):
     queries = []

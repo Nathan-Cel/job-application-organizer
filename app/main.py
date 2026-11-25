@@ -92,6 +92,7 @@ class CompanySearchIn(BaseModel):
 class CompanyContactIn(BaseModel):
     name: str
     city: str = ""
+    website: str = ""  # déjà trouvé : évite une nouvelle recherche
 
 
 class SpontaneousIn(BaseModel):
@@ -562,11 +563,23 @@ async def search_companies(req: CompanySearchIn, uid: str = Depends(current_user
     return {"center": center, "activities": activities, **found}
 
 
+@app.post("/api/companies/website")
+async def company_website(req: CompanyContactIn, uid: str = Depends(current_user)):
+    started = time.monotonic()
+    try:
+        website = await companies.find_website(req.name, req.city)
+    except companies.CompanySearchError as exc:
+        analytics.capture(uid, "company_website", {"ok": False, "ms": _ms(started), "error": "search"})
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    analytics.capture(uid, "company_website", {"ok": True, "ms": _ms(started), "found": bool(website)})
+    return {"website": website}
+
+
 @app.post("/api/companies/contact")
 async def company_contact(req: CompanyContactIn, uid: str = Depends(current_user)):
     started = time.monotonic()
     try:
-        contact = await companies.find_contact(req.name, req.city)
+        contact = await companies.find_contact(req.name, req.city, req.website)
     except companies.CompanySearchError as exc:
         analytics.capture(uid, "company_contact", {"ok": False, "ms": _ms(started), "error": "search"})
         raise HTTPException(status_code=422, detail=str(exc)) from exc
