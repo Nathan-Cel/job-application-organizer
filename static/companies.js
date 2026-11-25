@@ -90,7 +90,11 @@ function companyResultCard(c) {
     </div>`;
   }
   let draft = "";
-  if (st.writing) {
+  if (st.choosingCv) {
+    draft = `<div class="stack"><label class="lbl"><span>${t("company.cvContext")}</span><select class="field" data-cv-context="${c.siren}">
+        <option value="">${t("company.noCv")}</option>${profileCvs.map((cv) => `<option value="${esc(cv.file.id)}" ${st.cvFileId === cv.file.id ? "selected" : ""}>${esc(cv.title)}</option>`).join("")}</select></label>
+      <div class="actions"><button class="btn btn-accent" type="button" data-write="${c.siren}">${icon("spark")}${t("company.generate")}</button></div></div>`;
+  } else if (st.writing) {
     draft = `<div class="banner loading" role="status"><span>${t("company.writing")}</span><div class="progress"></div></div>`;
   } else if (st.writeError) {
     draft = `<p class="banner error" role="status">${esc(st.writeError)}</p>`;
@@ -116,7 +120,7 @@ function companyResultCard(c) {
       ${contact}
       <div class="actions">
         ${st.contact || st.contactLoading ? "" : `<button class="btn" type="button" data-contact="${c.siren}">${icon("search")}${t("company.findContact")}</button>`}
-        ${st.email || st.writing ? "" : `<button class="btn btn-accent" type="button" data-write="${c.siren}">${icon("spark")}${t("company.write")}</button>`}
+        ${st.email || st.writing || st.choosingCv ? "" : `<button class="btn btn-accent" type="button" data-write="${c.siren}">${icon("spark")}${t("company.write")}</button>`}
       </div>
       ${draft}
     </div></section>`;
@@ -154,6 +158,10 @@ function renderCompanies() {
 
   view.oninput = view.onchange = (e) => {
     const { key, sec } = e.target.dataset;
+    if (e.target.dataset.cvContext) {
+      finder.items[e.target.dataset.cvContext].cvFileId = e.target.value;
+      return;
+    }
     if (e.target.dataset.pickEmail) {
       finder.items[e.target.dataset.pickEmail].to = e.target.value;
       return renderCompanies();
@@ -187,7 +195,10 @@ function renderCompanies() {
     const c = finder.results.find((r) => r.siren === siren);
     const st = (finder.items[siren] ||= {});
     if (target.dataset.contact) await findContact(c, st);
-    else if (target.dataset.write) await writeSpontaneous(c, st);
+    else if (target.dataset.write) {
+      if (profileCvs.length && !st.choosingCv) st.choosingCv = true; // d'abord le choix du CV
+      else await writeSpontaneous(c, st);
+    }
     else if (target.dataset.copyMail) {
       await navigator.clipboard.writeText(`${st.email.subject}\n\n${st.email.body}`).catch(() => {});
       st.copied = true;
@@ -210,12 +221,12 @@ async function findContact(c, st) {
 }
 
 async function writeSpontaneous(c, st) {
-  Object.assign(st, { writing: true, writeError: "" });
+  Object.assign(st, { writing: true, writeError: "", choosingCv: false });
   renderCompanies();
   try {
     const company = { name: c.name, city: c.city, activity: c.activity, activityLabel: c.activityLabel, sizeLabel: sizeLabel(c.sizeCode) };
     st.email = await api("/api/companies/application", {
-      method: "POST", body: { company, what: finder.form.what, description: st.contact?.description || "", lang },
+      method: "POST", body: { company, what: finder.form.what, description: st.contact?.description || "", cvFileId: st.cvFileId || "", lang },
     });
   } catch (err) {
     st.writeError = err.message;

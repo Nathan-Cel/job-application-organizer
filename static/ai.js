@@ -221,6 +221,7 @@ function renderProfile() {
       }
       p.data = await api("/api/profile", { method: "PUT", body: { cvs } });
       p.notice = t("profile.saved");
+      profileCvs = p.data.cvs;
     } catch (err) {
       p.error = err.message;
     }
