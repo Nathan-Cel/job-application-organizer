@@ -74,51 +74,27 @@ function companyResultCard(c) {
   const st = finder.items[c.siren] || {};
   const meta = [c.activityLabel || c.activity, sizeLabel(c.sizeCode), t("company.distance", { km: c.distanceKm.toLocaleString(LOCALES[lang]) })]
     .filter(Boolean).join(" · ");
-  let contact = "";
-  if (st.contactLoading) {
-    contact = `<div class="banner loading" role="status"><span>${t("company.contactLoading")}</span><div class="progress"></div></div>`;
-  } else if (st.contactError) {
-    contact = `<p class="banner error" role="status">${esc(st.contactError)}</p>`;
-  } else if (st.contact) {
-    const k = st.contact;
-    const emails = k.emails.map((e, i) => `<label class="check"><input type="radio" name="to-${c.siren}" value="${esc(e.email)}" data-pick-email="${c.siren}" ${e.email === st.to ? "checked" : ""}>
-      <span>${esc(e.email)} <span class="meta">· ${t("emailKind." + e.kind)}</span></span></label>`).join("");
-    contact = `<div class="contact-box">
-      ${k.website ? `<p>${t("company.website")} <a class="link" href="${esc(k.website)}" target="_blank" rel="noopener">${esc(hostOf(k.website))}</a>
-        ${k.careersUrl ? ` · <a class="link" href="${esc(k.careersUrl)}" target="_blank" rel="noopener">${t("company.careers")}</a>` : ""}</p>` : `<p class="meta">${t("company.noWebsite")}</p>`}
-      ${emails ? `<div class="stack">${emails}</div><p class="help">${t("company.emailsHelp")}</p>` : k.website ? `<p class="meta">${t("company.noEmail")}</p>` : ""}
-    </div>`;
-  }
-  let draft = "";
-  if (st.writing) {
-    draft = `<div class="banner loading" role="status"><span>${t("company.writing")}</span><div class="progress"></div></div>`;
-  } else if (st.writeError) {
-    draft = `<p class="banner error" role="status">${esc(st.writeError)}</p>`;
-  } else if (st.email) {
-    const mailto = `mailto:${encodeURIComponent(st.to || "")}?subject=${encodeURIComponent(st.email.subject)}&body=${encodeURIComponent(st.email.body)}`;
-    draft = `<div class="stack">
-      ${input("to", t("form.sentTo"), { type: "email", value: st.to || "", sec: c.siren, ph: "recrutement@…" })}
-      ${input("subject", t("form.subject"), { value: st.email.subject, sec: c.siren })}
-      ${input("body", t("form.message"), { value: st.email.body, sec: c.siren, area: 10 })}
-      <p class="help">${t("company.attachCv")}</p>
-      <div class="actions">
-        <a class="btn btn-primary" href="${mailto}" data-mailto="${c.siren}">${icon("mail")}${t("company.openMail")}</a>
-        <button class="btn" type="button" data-copy-mail="${c.siren}">${t(st.copied ? "common.copied" : "common.copy")}</button>
-        <button class="btn btn-accent" type="button" data-add-box="${c.siren}" ${st.added || st.adding ? "disabled" : ""}>${t(st.added ? "company.added" : "company.addBox")}</button>
-      </div></div>`;
-  }
-  const known = inBox(c) || st.added;
+  const busy = st.loading ? "disabled" : "";
+  const findButton = (action, label) => `<div><button class="btn" type="button" data-${action}="${c.siren}" ${busy}>${icon("search")}${t(label)}</button></div>`;
+  const link = (url, label) => `<a class="link" href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>`;
+  let website;
+  if (st.loading === "website") website = `<span class="meta">${t("company.websiteLoading")}</span>`;
+  else if (st.website) website = link(st.website, hostOf(st.website)) + (st.contact?.careersUrl ? ` · ${link(st.contact.careersUrl, t("company.careers"))}` : "");
+  else if (st.website === "") website = `<span class="meta">${t("company.noWebsite")}</span>`;
+  else website = findButton("website", "company.findWebsite");
+  let emails;
+  if (st.loading === "contact") emails = `<span class="meta">${t("company.contactLoading")}</span>`;
+  else if (st.contact?.emails.length) emails = `<ul class="stack">${st.contact.emails.map((e) => `<li>${esc(e.email)} <span class="meta">· ${t("emailKind." + e.kind)}</span></li>`).join("")}</ul>`;
+  else if (st.contact) emails = `<span class="meta">${t("company.noEmail")}</span>`;
+  else emails = findButton("contact", "company.findContact");
   return `<section class="card"><div class="card-head"><h2 class="company-name">${esc(c.name)}</h2>
-      ${known ? `<span class="next-tag">${t("company.inBox")}</span>` : ""}</div>
+      ${inBox(c) ? `<span class="next-tag">${t("company.inBox")}</span>` : ""}</div>
     <div class="card-body">
       <p class="meta">${esc(meta)}</p>
       <p class="meta">${esc(c.address)}${c.legalName && normName(c.legalName) !== normName(c.name) ? ` · ${esc(c.legalName)}` : ""}</p>
-      ${contact}
-      <div class="actions">
-        ${st.contact || st.contactLoading ? "" : `<button class="btn" type="button" data-contact="${c.siren}">${icon("search")}${t("company.findContact")}</button>`}
-        ${st.email || st.writing ? "" : `<button class="btn btn-accent" type="button" data-write="${c.siren}">${icon("spark")}${t("company.write")}</button>`}
-      </div>
-      ${draft}
+      <div class="contact-box">${kv(t("company.website"), website)}${kv(t("company.emails"), emails)}</div>
+      ${st.error ? `<p class="banner error" role="status">${esc(st.error)}</p>` : ""}
+      <div class="actions"><button class="btn btn-accent" type="button" data-create="${c.siren}">${t("company.create")}</button></div>
     </div></section>`;
 }
 
@@ -153,21 +129,8 @@ function renderCompanies() {
   </div>`;
 
   view.oninput = view.onchange = (e) => {
-    const { key, sec } = e.target.dataset;
-    if (e.target.dataset.pickEmail) {
-      finder.items[e.target.dataset.pickEmail].to = e.target.value;
-      return renderCompanies();
-    }
-    if (!key) return;
-    if (sec) {
-      const st = finder.items[sec];
-      if (key === "to") st.to = e.target.value;
-      else st.email[key] = e.target.value;
-      const link = view.querySelector(`[data-mailto="${sec}"]`);
-      if (link) link.href = `mailto:${encodeURIComponent(st.to || "")}?subject=${encodeURIComponent(st.email.subject)}&body=${encodeURIComponent(st.email.body)}`;
-    } else {
-      f[key] = e.target.value;
-    }
+    const { key } = e.target.dataset;
+    if (key) f[key] = e.target.value;
   };
   view.onsubmit = (e) => {
     e.preventDefault();
@@ -181,69 +144,40 @@ function renderCompanies() {
     if (drop) {
       return runCompanySearch({ activities: finder.data.activities.map((a) => a.code).filter((c) => c !== drop.dataset.dropSector) });
     }
-    const target = el("[data-contact],[data-write],[data-copy-mail],[data-add-box],[data-mailto]");
+    const target = el("[data-website],[data-contact],[data-create]");
     if (!target) return;
     const siren = Object.values(target.dataset)[0];
     const c = finder.results.find((r) => r.siren === siren);
     const st = (finder.items[siren] ||= {});
-    if (target.dataset.contact) await findContact(c, st);
-    else if (target.dataset.write) await writeSpontaneous(c, st);
-    else if (target.dataset.copyMail) {
-      await navigator.clipboard.writeText(`${st.email.subject}\n\n${st.email.body}`).catch(() => {});
-      st.copied = true;
-    } else if (target.dataset.addBox) await addToBox(c, st);
-    else if (target.dataset.mailto) return track("spontaneous_opened");
+    if (target.dataset.create) return createSpontaneous(c, st);
+    await lookUp(c, st, target.dataset.website ? "website" : "contact");
     renderCompanies();
   };
 }
 
-async function findContact(c, st) {
-  Object.assign(st, { contactLoading: true, contactError: "" });
+// Site de l'entreprise, ou e-mails publiés sur ce site (cherché d'abord s'il n'est pas encore connu).
+async function lookUp(c, st, what) {
+  Object.assign(st, { loading: what, error: "" });
   renderCompanies();
   try {
-    st.contact = await api("/api/companies/contact", { method: "POST", body: { name: c.name, city: c.city } });
-    st.to ||= st.contact.emails[0]?.email || "";
+    const body = { name: c.name, city: c.city, website: st.website || "" };
+    const found = await api(`/api/companies/${what}`, { method: "POST", body });
+    if (what === "contact") st.contact = found;
+    st.website = found.website;
   } catch (err) {
-    st.contactError = err.message;
+    st.error = err.message;
   }
-  st.contactLoading = false;
+  st.loading = "";
 }
 
-async function writeSpontaneous(c, st) {
-  Object.assign(st, { writing: true, writeError: "" });
-  renderCompanies();
-  try {
-    const company = { name: c.name, city: c.city, activity: c.activity, activityLabel: c.activityLabel, sizeLabel: sizeLabel(c.sizeCode) };
-    st.email = await api("/api/companies/application", {
-      method: "POST", body: { company, what: finder.form.what, description: st.contact?.description || "", lang },
-    });
-  } catch (err) {
-    st.writeError = err.message;
-  }
-  st.writing = false;
-}
-
-async function addToBox(c, st) {
-  st.adding = true;
-  renderCompanies();
-  const { subject, body } = st.email;
-  // Une conversation exige une adresse : sans elle, le brouillon est gardé dans une section libre.
-  const draft = st.to
-    ? { id: "s-mail", kind: "conversation", name: c.name, handle: st.to, platform: "E-mail", messages: [{ date: "", text: `${subject}\n\n${body}` }] }
-    : { id: "s-mail", kind: "custom", title: subject, content: body };
-  const sections = [
-    draft,
-    { id: "s-company", kind: "company", summary: [c.activityLabel, c.address, st.contact?.website].filter(Boolean).join("\n"), why: "" },
-  ];
-  if (st.to) sections.push({ id: "s-contact", kind: "contact", name: "", position: "", email: st.to, phone: "", extra: [] });
-  try {
-    await api("/api/applications", {
-      method: "POST", body: { type: "spontaneous", company: c.name, jobTitle: finder.form.what, status: "notsent", sections },
-    });
-    st.added = true;
-    loadApps().catch(() => {});
-  } catch (err) {
-    st.writeError = err.message;
-  }
-  st.adding = false;
+// Ouvre le formulaire de candidature spontanée prérempli ; l'e-mail s'y rédige (section Lettre).
+function createSpontaneous(c, st) {
+  const k = st.contact || { careersUrl: "", description: "", emails: [] };
+  const summary = [[c.activityLabel || c.activity, sizeLabel(c.sizeCode)].filter(Boolean).join(" · "),
+    c.address, st.website, k.careersUrl, k.description].filter(Boolean).join("\n");
+  const sections = [{ kind: "company", summary }];
+  if (k.emails.length) sections.push({ kind: "contact", email: k.emails[0].email });
+  sections.push({ kind: "cv" }, { kind: "letter" });
+  prefill = { type: "spontaneous", company: c.name, jobTitle: finder.form.what, sections };
+  location.hash = "#/new";
 }

@@ -36,6 +36,7 @@ const GRIP = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24"
 
 let userId; // undefined tant que Firebase n'a pas répondu, null si déconnecté
 let me = null; // { uid, admin, llm } renvoyé par /api/me
+let profileCvs = []; // CV du profil, proposés dans le formulaire et pour l'e-mail spontané
 let apps = [];
 let appsLoaded = false;
 let rerender = () => {};
@@ -417,11 +418,14 @@ function cvCard(s, app, cls) {
   if (!s?.file) return "";
   const f = s.file;
   const when = app.sentAt ? t("file.versionSent", { date: fmtDate(app.sentAt) }) : t("file.added", { date: fmtDate(f.addedAt) });
-  return card(t("detail.cvSent"), `
+  const regular = app.type === "regular";
+  const note = regular ? (s.fromProfile ? t("cv.notPersonalized") : "") : t("cv.usage." + (s.usage || "sent"));
+  return card(t(regular || s.usage !== "context" ? "detail.cvSent" : "section.cv"), `
     <div class="file-tile">
       <img src="${fileUrl(f)}/preview" alt="">
       <div class="stack">
-        <div><div class="file-name">${esc(f.name)}</div><div class="file-meta">${pagesLabel(f.pages)} · ${when}</div></div>
+        <div><div class="file-name">${esc(f.name)}</div><div class="file-meta">${pagesLabel(f.pages)} · ${when}</div>
+          ${note ? `<div class="file-meta">${note}</div>` : ""}</div>
         <div class="actions">
           <a class="btn" href="${fileUrl(f)}" target="_blank" rel="noopener">${t("file.open")}</a>
           <a class="btn" href="${fileUrl(f, true)}">${t("file.download")}</a>
@@ -547,9 +551,9 @@ function startForm(type, values = {}) {
 function showNew() {
   view.className = "";
   if (!form && prefill) {
-    const { url, rawText, ...basics } = prefill;
-    startForm("regular", basics);
-    Object.assign(section(form, "offerLink"), { url, paste: rawText });
+    const { type = "regular", url, rawText, ...basics } = prefill;
+    startForm(type, basics);
+    if (type === "regular") Object.assign(section(form, "offerLink"), { url, paste: rawText });
     prefill = null;
   }
   rerender = () => (form ? renderForm() : renderTypeStep());
@@ -613,6 +617,27 @@ function dropZone(s, textKey) {
     ${chooser(s, "form.chooseFile")}</div>`;
 }
 
+// Choix d'un CV du profil, puis la mention propre au type de candidature.
+function cvChoices(s) {
+  const pick = profileCvs.length ? `<label class="lbl"><span>${t("form.profileCv")}</span><select class="field" data-profile-cv="${s.id}">
+      <option value="">—</option>${profileCvs.map((cv, i) => `<option value="${i}">${esc(cv.title)}</option>`).join("")}</select></label>` : "";
+  if (!(s._pending || s.file)) return pick;
+  if (form.type === "regular") return pick + (s.fromProfile ? `<p class="help">${t("cv.notPersonalized")}</p>` : "");
+  return pick + `<label class="lbl"><span>${t("form.cvUsage")}</span><select class="field" data-key="usage" data-sec="${s.id}">
+      ${["sent", "context"].map((v) => `<option value="${v}" ${(s.usage || "sent") === v ? "selected" : ""}>${t("cv.usage." + v)}</option>`).join("")}</select></label>`;
+}
+
+// Le PDF du profil est copié dans la candidature : retirer l'un ne supprime pas l'autre.
+async function pickProfileCv(s, cv) {
+  const res = await fetch(fileUrl(cv.file));
+  if (!res.ok) {
+    form.error = t("form.profileCvError");
+    return renderForm();
+  }
+  setFile(s.id, new File([await res.blob()], cv.file.name, { type: "application/pdf" }), true);
+  s._profileFileId = cv.file.id; // contexte pour l'IA tant que la copie n'est pas envoyée
+}
+
 function aiBanner(where) {
   const f = form;
   if (f.ai === "loading") {
@@ -649,7 +674,7 @@ function sectionBody(s) {
       return input("summary", t("form.companySummary"), { value: s.summary, sec: id, ph: t("ph.companySummary"), attrs: busy, area: 3 })
         + input("why", t("form.whyCompany"), { value: s.why, sec: id, ph: t("ph.why"), area: 3 });
     case "cv":
-      return dropZone(s, "form.dropCv");
+      return dropZone(s, "form.dropCv") + cvChoices(s);
     case "letter": {
       const writing = s._ai === "loading";
       return dropZone(s, "form.dropLetter") + input("text", t("form.letterText"), { value: s.text, sec: id, ph: t("form.letterPh"), area: 4, attrs: writing ? "disabled" : "" })
@@ -794,11 +819,18 @@ function onFormInput(e) {
 
 function onFormChange(e) {
   if (e.target.dataset.file) setFile(e.target.dataset.file, e.target.files[0]);
+  const { profileCv } = e.target.dataset;
+  if (profileCv && e.target.value) pickProfileCv(findSection(profileCv), profileCvs[e.target.value]);
 }
 
-function setFile(sectionId, file) {
+function setFile(sectionId, file, fromProfile = false) {
   if (!file) return;
-  findSection(sectionId)._pending = file;
+  const s = findSection(sectionId);
+  s._pending = file;
+  if (s.kind === "cv") {
+    s.fromProfile = fromProfile;
+    delete s._profileFileId;
+  }
   renderForm();
 }
 
@@ -902,7 +934,7 @@ async function saveForm() {
       s.file = await api(`/api/files?name=${encodeURIComponent(s._pending.name)}`, { method: "POST", body: s._pending });
       delete s._pending;
     }
-    const sections = f.sections.map(({ _pending, _ai, _aiError, paste, ...s }) => {
+    const sections = f.sections.map(({ _pending, _ai, _aiError, _profileFileId, paste, ...s }) => {
       if (s.kind === "offerLink" && paste?.trim()) s.rawText = paste.trim();
       if (s.kind === "keyPoints") for (const k of KEY_LISTS) s[k] = s[k].split("\n").map((l) => l.trim()).filter(Boolean);
       return s;
@@ -1099,6 +1131,10 @@ async function onAuth(user) {
   route();
   if (me && !me.admin) showReviewPopup();
   if (userId && location.hash.split("/")[1]) loadApps().catch(() => {}); // Box charge déjà la liste
+  if (userId) {
+    profileCvs = (await api("/api/profile").catch(() => ({ cvs: [] }))).cvs;
+    rerender();
+  }
 }
 
 let authMode = "signIn"; // ou "signUp"

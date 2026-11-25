@@ -5,7 +5,7 @@ import httpx
 
 from app import companies, llm, websearch
 
-from .test_app import client  # noqa: F401  (fixture)
+from .test_app import _pdf, client  # noqa: F401  (fixture)
 
 CENTER = {"label": "Lille", "lat": 50.6309, "lon": 3.0454}
 
@@ -141,6 +141,13 @@ def test_find_contact(monkeypatch):
     ]  # l'adresse gmail et les adresses parasites sont écartées
     assert "communication digitale" in found["description"] and found["pages"] == 3
 
+    async def no_search(query, max_results=8, domains=()):
+        raise AssertionError("le site est déjà connu")
+
+    monkeypatch.setattr(websearch, "search", no_search)
+    again = asyncio.run(companies.find_contact("Agence Lumen", "Lille", "https://www.agence-lumen.fr/"))
+    assert again["emails"] == found["emails"]
+
 
 def test_find_contact_without_website(monkeypatch):
     queries = []
@@ -198,3 +205,8 @@ def test_contact_and_application_endpoints(client, monkeypatch):  # noqa: F811
     system, user = prompts_seen[0][0]["content"], prompts_seen[0][-1]["content"]
     assert "Aucun profil" in system and "Agence Lumen" in user and "communication digitale" in user
     assert user.endswith("Always answer in English.")
+
+    monkeypatch.setattr("app.main._pdf_text", lambda content, max_chars=8000: "CV: Airflow pipelines at Acme")
+    cv = client.post("/api/files", params={"name": "cv.pdf"}, content=_pdf()).json()
+    client.post("/api/companies/application", json={"company": {"name": "Agence Lumen"}, "cvFileId": cv["id"]})
+    assert "Airflow pipelines" in prompts_seen[-1][0]["content"]
