@@ -147,27 +147,17 @@ def test_find_application_rules():
     assert replies.find_application(apps, "", "Data engineer") is None
 
 
-def test_chat_and_write(client, monkeypatch):  # noqa: F811
+def test_write(client, monkeypatch):  # noqa: F811
     seen = []
-
-    async def fake_complete(messages, temperature=0.5, tools=None, **kwargs):
-        seen.append(messages)
-        return {"content": "Réponse"}
 
     async def fake_chat(messages, temperature=0.5, **kwargs):
         seen.append(messages)
         return "Texte"
 
-    monkeypatch.setattr(llm, "complete", fake_complete)
     monkeypatch.setattr(llm, "chat", fake_chat)
-    data = client.post("/api/chat", json={"messages": [{"role": "user", "content": "Salut"}], "lang": "fr"}).json()
-    assert data["text"] == "Réponse"
-    assert "français" in seen[0][0]["content"]
-
     assert client.post("/api/write", json={"kind": "letter", "offer": " "}).status_code == 400
     assert client.post("/api/write", json={"kind": "letter", "offer": "Data engineer", "lang": "en"}).json() == {"text": "Texte"}
     assert "Always answer in English" in seen[-1][0]["content"]
-    assert client.post("/api/write", json={"kind": "cv"}).status_code == 400  # l'IA ne lit pas les CV du profil
     assert client.post("/api/write", json={"kind": "email", "goal": "thanks", "received": "Merci"}).status_code == 200
     assert client.post("/api/write", json={"kind": "email", "goal": "unknown"}).status_code == 400
 

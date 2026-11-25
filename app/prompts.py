@@ -9,7 +9,6 @@ SYSTEM_BASE = (
 
 
 MAX_PROFILE_FIELD = 2500
-MAX_HISTORY = 10
 
 
 def _profile_block(profile: dict) -> str:
@@ -29,16 +28,6 @@ def system_message(profile: dict, lang: str = "fr") -> dict:
     return {"role": "system", "content": f"{SYSTEM_BASE} {language}\n\n{_profile_block(profile)}"}
 
 
-def chat_messages(profile: dict, history: list[dict], lang: str = "fr") -> list[dict]:
-    # On ne garde que les rôles attendus et les derniers messages.
-    clean = [
-        {"role": m["role"], "content": m["content"]}
-        for m in history
-        if m.get("role") in ("user", "assistant") and m.get("content")
-    ]
-    return [system_message(profile, lang)] + clean[-MAX_HISTORY:]
-
-
 def cover_letter_messages(profile: dict, offer: str, company: str, extra: str, lang: str = "fr") -> list[dict]:
     prompt = (
         "Rédige une lettre de motivation personnalisée (250 à 350 mots) pour l'offre ci-dessous. "
@@ -48,19 +37,6 @@ def cover_letter_messages(profile: dict, offer: str, company: str, extra: str, l
         f"Entreprise : {company or 'non précisée'}\n"
         f"Consignes supplémentaires : {extra or 'aucune'}\n\n"
         f"Offre :\n{offer}"
-    )
-    return [system_message(profile, lang), {"role": "user", "content": f"{prompt}\n\n{LANGUAGES.get(lang, LANGUAGES['fr'])}"}]
-
-
-def cv_review_messages(profile: dict, offer: str, lang: str = "fr") -> list[dict]:
-    target = f"pour cette offre :\n{offer}" if offer.strip() else "de façon générale."
-    prompt = (
-        "Analyse mon CV et propose des améliorations concrètes " + target + "\n\n"
-        "Réponds avec :\n"
-        "1. Points forts\n"
-        "2. Points à améliorer (avec exemples de reformulation)\n"
-        "3. Mots-clés de l'offre absents du CV (si une offre est fournie)\n"
-        "4. Une proposition de titre et d'accroche de CV"
     )
     return [system_message(profile, lang), {"role": "user", "content": f"{prompt}\n\n{LANGUAGES.get(lang, LANGUAGES['fr'])}"}]
 

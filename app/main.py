@@ -22,7 +22,7 @@ from pydantic import BaseModel, ValidationError
 
 load_dotenv()
 
-from . import agent, analytics, companies, jobs, llm, offer, prompts, replies, stats, store, websearch  # noqa: E402  (après load_dotenv)
+from . import analytics, companies, jobs, llm, offer, prompts, replies, stats, store, websearch  # noqa: E402  (après load_dotenv)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 MAX_FILE_BYTES = 10_000_000
@@ -65,13 +65,8 @@ class PrepRequest(BaseModel):
     lang: Lang = "fr"
 
 
-class ChatRequest(BaseModel):
-    messages: list[dict]
-    lang: Lang = "fr"
-
-
 class WriteRequest(BaseModel):
-    kind: Literal["letter", "cv", "email"]
+    kind: Literal["letter", "email"]
     offer: str = ""
     company: str = ""
     extra: str = ""
@@ -319,40 +314,23 @@ async def interview_prep(app_id: str, req: PrepRequest, uid: str = Depends(curre
     return store.update_application(app_id, record)
 
 
-# ---------- Assistant et rédaction ----------
-
-@app.post("/api/chat")
-async def chat(req: ChatRequest, uid: str = Depends(current_user)):
-    started = time.monotonic()
-    try:
-        result = await agent.run({}, req.messages, req.lang)
-    except llm.LLMError as exc:
-        _ai_error(uid, "chat_message", started, exc)
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    analytics.capture(uid, "chat_message", {"ok": True, "ms": _ms(started), "steps": len(result["steps"]),
-                                            "offers": len(result["offers"]), "tokens": result["tokens"]})
-    return result
-
+# ---------- Rédaction ----------
 
 @app.post("/api/write")
 async def write(req: WriteRequest, uid: str = Depends(current_user)):
-    """Lettre de motivation, analyse de CV ou e-mail au recruteur."""
+    """Lettre de motivation ou e-mail au recruteur."""
     profile = {}  # le profil ne contient plus que des CV en PDF, que l'IA ne lit pas
     if req.kind == "letter":
         if not req.offer.strip():
             raise HTTPException(status_code=400, detail="Paste the job offer.")
         messages = prompts.cover_letter_messages(profile, req.offer, req.company, req.extra, req.lang)
-    elif req.kind == "cv":
-        if not (profile.get("cv") or "").strip():
-            raise HTTPException(status_code=400, detail="Add your CV in your profile first.")
-        messages = prompts.cv_review_messages(profile, req.offer, req.lang)
     else:
         if req.goal not in prompts.EMAIL_GOALS:
             raise HTTPException(status_code=400, detail="Unknown email goal.")
         messages = prompts.email_messages(profile, req.received, req.goal, req.tone, req.extra, req.lang)
     started = time.monotonic()
     try:
-        text = await llm.chat(messages, 0.4 if req.kind == "cv" else 0.5)
+        text = await llm.chat(messages, 0.5)
     except llm.LLMError as exc:
         _ai_error(uid, "text_written", started, exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc

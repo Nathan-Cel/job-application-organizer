@@ -133,8 +133,7 @@ app/
   replies.py   # réponses de recruteurs → mise à jour de la candidature ; préparation d'entretien
   companies.py # entreprises à démarcher : secteurs NAF, annuaire officiel, contact publié, candidature spontanée
   data/naf.json # nomenclature officielle NAF rév. 2 (code → libellé)
-  agent.py     # assistant avec outils de recherche web (function calling)
-  prompts.py   # prompts (assistant, lettre, CV, e-mails, réponses, préparation)
+  prompts.py   # prompts (lettre, e-mails, réponses, préparation)
   analytics.py # statistiques d'usage : événements, PostHog, agrégats
   stats.py     # comptes et candidatures créés par jour et par semaine (historique complet)
   llm.py       # client Groq

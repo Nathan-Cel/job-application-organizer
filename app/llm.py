@@ -23,10 +23,6 @@ class LLMError(Exception):
     """Erreur lisible renvoyée à l'utilisateur."""
 
 
-class ToolCallError(LLMError):
-    """Le modèle a tenté d'appeler un outil inexistant ou avec des arguments invalides."""
-
-
 def is_configured() -> bool:
     return bool(os.getenv("GROQ_API_KEY"))
 
@@ -50,9 +46,9 @@ def _degenerate(text: str) -> bool:
     return bool(re.search(r"(\s)\1{100,}|(\S)\2{200,}", text))
 
 
-async def complete(messages: list[dict], temperature: float = 0.5, tools: list[dict] | None = None,
+async def complete(messages: list[dict], temperature: float = 0.5,
                    max_tokens: int = MAX_OUTPUT_TOKENS, json_mode: bool = False) -> dict:
-    """Renvoie le message brut de l'assistant (avec éventuels `tool_calls`)."""
+    """Renvoie le message brut de l'assistant."""
     api_key = (os.getenv("GROQ_API_KEY") or "").strip().strip("\"'")
     if not api_key:
         raise LLMError(
@@ -79,9 +75,6 @@ async def complete(messages: list[dict], temperature: float = 0.5, tools: list[d
         payload["reasoning_effort"] = "low"
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
-    if tools:
-        payload["tools"] = tools
-        payload["tool_choice"] = "auto"
     headers = {"Authorization": f"Bearer {api_key}"}
 
     for attempt in range(len(RETRY_DELAYS) + 1):
@@ -102,8 +95,6 @@ async def complete(messages: list[dict], temperature: float = 0.5, tools: list[d
             "Requête trop volumineuse pour le plan gratuit Groq (limite de tokens par minute). "
             f"Raccourcis ton message ou ton CV, ou change de modèle via GROQ_MODEL. Détail : {_detail(resp)}"
         )
-    if resp.status_code == 400 and "tool" in _detail(resp).lower():
-        raise ToolCallError(f"Appel d'outil refusé par Groq : {_detail(resp)}")
     if resp.status_code >= 400:
         raise LLMError(f"Erreur Groq {resp.status_code} : {_detail(resp)}")
 
