@@ -74,55 +74,32 @@ function companyResultCard(c) {
   const st = finder.items[c.siren] || {};
   const meta = [c.activityLabel || c.activity, sizeLabel(c.sizeCode), t("company.distance", { km: c.distanceKm.toLocaleString(LOCALES[lang]) })]
     .filter(Boolean).join(" · ");
-  let contact = "";
-  if (st.contactLoading) {
-    contact = `<div class="banner loading" role="status"><span>${t("company.contactLoading")}</span><div class="progress"></div></div>`;
-  } else if (st.contactError) {
-    contact = `<p class="banner error" role="status">${esc(st.contactError)}</p>`;
-  } else if (st.contact) {
-    const k = st.contact;
-    const emails = k.emails.map((e, i) => `<label class="check"><input type="radio" name="to-${c.siren}" value="${esc(e.email)}" data-pick-email="${c.siren}" ${e.email === st.to ? "checked" : ""}>
-      <span>${esc(e.email)} <span class="meta">· ${t("emailKind." + e.kind)}</span></span></label>`).join("");
-    contact = `<div class="contact-box">
+  let info = "";
+  if (st.infoLoading) {
+    info = `<div class="banner loading" role="status"><span>${t("company.infoLoading")}</span><div class="progress"></div></div>`;
+  } else if (st.infoError) {
+    info = `<p class="banner error" role="status">${esc(st.infoError)}</p>`;
+  } else if (st.info) {
+    const k = st.info;
+    const emails = k.emails.map((e) => `<li>${esc(e.email)} <span class="meta">· ${t("emailKind." + e.kind)}</span></li>`).join("");
+    info = `<div class="contact-box">
       ${k.website ? `<p>${t("company.website")} <a class="link" href="${esc(k.website)}" target="_blank" rel="noopener">${esc(hostOf(k.website))}</a>
         ${k.careersUrl ? ` · <a class="link" href="${esc(k.careersUrl)}" target="_blank" rel="noopener">${t("company.careers")}</a>` : ""}</p>` : `<p class="meta">${t("company.noWebsite")}</p>`}
-      ${emails ? `<div class="stack">${emails}</div><p class="help">${t("company.emailsHelp")}</p>` : k.website ? `<p class="meta">${t("company.noEmail")}</p>` : ""}
+      ${k.description ? `<div class="prose clamp">${paras(k.description)}</div>` : ""}
+      ${emails ? `<ul class="stack">${emails}</ul>` : k.website ? `<p class="meta">${t("company.noEmail")}</p>` : ""}
     </div>`;
   }
-  let draft = "";
-  if (st.choosingCv) {
-    draft = `<div class="stack"><label class="lbl"><span>${t("company.cvContext")}</span><select class="field" data-cv-context="${c.siren}">
-        <option value="">${t("company.noCv")}</option>${profileCvs.map((cv) => `<option value="${esc(cv.file.id)}" ${st.cvFileId === cv.file.id ? "selected" : ""}>${esc(cv.title)}</option>`).join("")}</select></label>
-      <div class="actions"><button class="btn btn-accent" type="button" data-write="${c.siren}">${icon("spark")}${t("company.generate")}</button></div></div>`;
-  } else if (st.writing) {
-    draft = `<div class="banner loading" role="status"><span>${t("company.writing")}</span><div class="progress"></div></div>`;
-  } else if (st.writeError) {
-    draft = `<p class="banner error" role="status">${esc(st.writeError)}</p>`;
-  } else if (st.email) {
-    const mailto = `mailto:${encodeURIComponent(st.to || "")}?subject=${encodeURIComponent(st.email.subject)}&body=${encodeURIComponent(st.email.body)}`;
-    draft = `<div class="stack">
-      ${input("to", t("form.sentTo"), { type: "email", value: st.to || "", sec: c.siren, ph: "recrutement@…" })}
-      ${input("subject", t("form.subject"), { value: st.email.subject, sec: c.siren })}
-      ${input("body", t("form.message"), { value: st.email.body, sec: c.siren, area: 10 })}
-      <p class="help">${t("company.attachCv")}</p>
-      <div class="actions">
-        <a class="btn btn-primary" href="${mailto}" data-mailto="${c.siren}">${icon("mail")}${t("company.openMail")}</a>
-        <button class="btn" type="button" data-copy-mail="${c.siren}">${t(st.copied ? "common.copied" : "common.copy")}</button>
-        <button class="btn btn-accent" type="button" data-add-box="${c.siren}" ${st.added || st.adding ? "disabled" : ""}>${t(st.added ? "company.added" : "company.addBox")}</button>
-      </div></div>`;
-  }
-  const known = inBox(c) || st.added;
+  const looked = st.info || st.infoError;
   return `<section class="card"><div class="card-head"><h2 class="company-name">${esc(c.name)}</h2>
-      ${known ? `<span class="next-tag">${t("company.inBox")}</span>` : ""}</div>
+      ${inBox(c) ? `<span class="next-tag">${t("company.inBox")}</span>` : ""}</div>
     <div class="card-body">
       <p class="meta">${esc(meta)}</p>
       <p class="meta">${esc(c.address)}${c.legalName && normName(c.legalName) !== normName(c.name) ? ` · ${esc(c.legalName)}` : ""}</p>
-      ${contact}
+      ${info}
       <div class="actions">
-        ${st.contact || st.contactLoading ? "" : `<button class="btn" type="button" data-contact="${c.siren}">${icon("search")}${t("company.findContact")}</button>`}
-        ${st.email || st.writing || st.choosingCv ? "" : `<button class="btn btn-accent" type="button" data-write="${c.siren}">${icon("spark")}${t("company.write")}</button>`}
+        ${looked || st.infoLoading ? "" : `<button class="btn" type="button" data-info="${c.siren}">${icon("search")}${t("company.findInfo")}</button>`}
+        ${looked ? `<button class="btn btn-accent" type="button" data-create="${c.siren}">${t("company.create")}</button>` : ""}
       </div>
-      ${draft}
     </div></section>`;
 }
 
@@ -157,25 +134,8 @@ function renderCompanies() {
   </div>`;
 
   view.oninput = view.onchange = (e) => {
-    const { key, sec } = e.target.dataset;
-    if (e.target.dataset.cvContext) {
-      finder.items[e.target.dataset.cvContext].cvFileId = e.target.value;
-      return;
-    }
-    if (e.target.dataset.pickEmail) {
-      finder.items[e.target.dataset.pickEmail].to = e.target.value;
-      return renderCompanies();
-    }
-    if (!key) return;
-    if (sec) {
-      const st = finder.items[sec];
-      if (key === "to") st.to = e.target.value;
-      else st.email[key] = e.target.value;
-      const link = view.querySelector(`[data-mailto="${sec}"]`);
-      if (link) link.href = `mailto:${encodeURIComponent(st.to || "")}?subject=${encodeURIComponent(st.email.subject)}&body=${encodeURIComponent(st.email.body)}`;
-    } else {
-      f[key] = e.target.value;
-    }
+    const { key } = e.target.dataset;
+    if (key) f[key] = e.target.value;
   };
   view.onsubmit = (e) => {
     e.preventDefault();
@@ -189,72 +149,36 @@ function renderCompanies() {
     if (drop) {
       return runCompanySearch({ activities: finder.data.activities.map((a) => a.code).filter((c) => c !== drop.dataset.dropSector) });
     }
-    const target = el("[data-contact],[data-write],[data-copy-mail],[data-add-box],[data-mailto]");
+    const target = el("[data-info],[data-create]");
     if (!target) return;
     const siren = Object.values(target.dataset)[0];
     const c = finder.results.find((r) => r.siren === siren);
     const st = (finder.items[siren] ||= {});
-    if (target.dataset.contact) await findContact(c, st);
-    else if (target.dataset.write) {
-      if (profileCvs.length && !st.choosingCv) st.choosingCv = true; // d'abord le choix du CV
-      else await writeSpontaneous(c, st);
-    }
-    else if (target.dataset.copyMail) {
-      await navigator.clipboard.writeText(`${st.email.subject}\n\n${st.email.body}`).catch(() => {});
-      st.copied = true;
-    } else if (target.dataset.addBox) await addToBox(c, st);
-    else if (target.dataset.mailto) return track("spontaneous_opened");
+    if (target.dataset.create) return createSpontaneous(c, st);
+    await findInfo(c, st);
     renderCompanies();
   };
 }
 
-async function findContact(c, st) {
-  Object.assign(st, { contactLoading: true, contactError: "" });
+async function findInfo(c, st) {
+  Object.assign(st, { infoLoading: true, infoError: "" });
   renderCompanies();
   try {
-    st.contact = await api("/api/companies/contact", { method: "POST", body: { name: c.name, city: c.city } });
-    st.to ||= st.contact.emails[0]?.email || "";
+    st.info = await api("/api/companies/contact", { method: "POST", body: { name: c.name, city: c.city } });
   } catch (err) {
-    st.contactError = err.message;
+    st.infoError = err.message;
   }
-  st.contactLoading = false;
+  st.infoLoading = false;
 }
 
-async function writeSpontaneous(c, st) {
-  Object.assign(st, { writing: true, writeError: "", choosingCv: false });
-  renderCompanies();
-  try {
-    const company = { name: c.name, city: c.city, activity: c.activity, activityLabel: c.activityLabel, sizeLabel: sizeLabel(c.sizeCode) };
-    st.email = await api("/api/companies/application", {
-      method: "POST", body: { company, what: finder.form.what, description: st.contact?.description || "", cvFileId: st.cvFileId || "", lang },
-    });
-  } catch (err) {
-    st.writeError = err.message;
-  }
-  st.writing = false;
-}
-
-async function addToBox(c, st) {
-  st.adding = true;
-  renderCompanies();
-  const { subject, body } = st.email;
-  // Une conversation exige une adresse : sans elle, le brouillon est gardé dans une section libre.
-  const draft = st.to
-    ? { id: "s-mail", kind: "conversation", name: c.name, handle: st.to, platform: "E-mail", messages: [{ date: "", text: `${subject}\n\n${body}` }] }
-    : { id: "s-mail", kind: "custom", title: subject, content: body };
-  const sections = [
-    draft,
-    { id: "s-company", kind: "company", summary: [c.activityLabel, c.address, st.contact?.website].filter(Boolean).join("\n"), why: "" },
-  ];
-  if (st.to) sections.push({ id: "s-contact", kind: "contact", name: "", position: "", email: st.to, phone: "", extra: [] });
-  try {
-    await api("/api/applications", {
-      method: "POST", body: { type: "spontaneous", company: c.name, jobTitle: finder.form.what, status: "notsent", sections },
-    });
-    st.added = true;
-    loadApps().catch(() => {});
-  } catch (err) {
-    st.writeError = err.message;
-  }
-  st.adding = false;
+// Ouvre le formulaire de candidature spontanée prérempli ; l'e-mail s'y rédige (section Lettre).
+function createSpontaneous(c, st) {
+  const k = st.info || { website: "", careersUrl: "", description: "", emails: [] };
+  const summary = [[c.activityLabel || c.activity, sizeLabel(c.sizeCode)].filter(Boolean).join(" · "),
+    c.address, k.website, k.careersUrl, k.description].filter(Boolean).join("\n");
+  const sections = [{ kind: "company", summary }];
+  if (k.emails.length) sections.push({ kind: "contact", email: k.emails[0].email });
+  sections.push({ kind: "cv" }, { kind: "letter" });
+  prefill = { type: "spontaneous", company: c.name, jobTitle: finder.form.what, sections };
+  location.hash = "#/new";
 }

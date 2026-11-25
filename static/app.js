@@ -551,9 +551,9 @@ function startForm(type, values = {}) {
 function showNew() {
   view.className = "";
   if (!form && prefill) {
-    const { url, rawText, ...basics } = prefill;
-    startForm("regular", basics);
-    Object.assign(section(form, "offerLink"), { url, paste: rawText });
+    const { type = "regular", url, rawText, ...basics } = prefill;
+    startForm(type, basics);
+    if (type === "regular") Object.assign(section(form, "offerLink"), { url, paste: rawText });
     prefill = null;
   }
   rerender = () => (form ? renderForm() : renderTypeStep());
@@ -635,6 +635,7 @@ async function pickProfileCv(s, cv) {
     return renderForm();
   }
   setFile(s.id, new File([await res.blob()], cv.file.name, { type: "application/pdf" }), true);
+  s._profileFileId = cv.file.id; // contexte pour l'IA tant que la copie n'est pas envoyée
 }
 
 function aiBanner(where) {
@@ -826,7 +827,10 @@ function setFile(sectionId, file, fromProfile = false) {
   if (!file) return;
   const s = findSection(sectionId);
   s._pending = file;
-  if (s.kind === "cv") s.fromProfile = fromProfile;
+  if (s.kind === "cv") {
+    s.fromProfile = fromProfile;
+    delete s._profileFileId;
+  }
   renderForm();
 }
 
@@ -930,7 +934,7 @@ async function saveForm() {
       s.file = await api(`/api/files?name=${encodeURIComponent(s._pending.name)}`, { method: "POST", body: s._pending });
       delete s._pending;
     }
-    const sections = f.sections.map(({ _pending, _ai, _aiError, paste, ...s }) => {
+    const sections = f.sections.map(({ _pending, _ai, _aiError, _profileFileId, paste, ...s }) => {
       if (s.kind === "offerLink" && paste?.trim()) s.rawText = paste.trim();
       if (s.kind === "keyPoints") for (const k of KEY_LISTS) s[k] = s[k].split("\n").map((l) => l.trim()).filter(Boolean);
       return s;
