@@ -46,9 +46,9 @@ def _degenerate(text: str) -> bool:
     return bool(re.search(r"(\s)\1{100,}|(\S)\2{200,}", text))
 
 
-async def complete(messages: list[dict], temperature: float = 0.5, tools: list[dict] | None = None,
+async def complete(messages: list[dict], temperature: float = 0.5,
                    max_tokens: int = MAX_OUTPUT_TOKENS, json_mode: bool = False) -> dict:
-    """Renvoie le message brut de l'assistant (avec éventuels `tool_calls`)."""
+    """Renvoie le message brut de l'assistant."""
     api_key = (os.getenv("GROQ_API_KEY") or "").strip().strip("\"'")
     if not api_key:
         raise LLMError(
@@ -75,9 +75,6 @@ async def complete(messages: list[dict], temperature: float = 0.5, tools: list[d
         payload["reasoning_effort"] = "low"
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
-    if tools:
-        payload["tools"] = tools
-        payload["tool_choice"] = "auto"
     headers = {"Authorization": f"Bearer {api_key}"}
 
     for attempt in range(len(RETRY_DELAYS) + 1):

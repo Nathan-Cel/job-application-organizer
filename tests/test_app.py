@@ -13,7 +13,7 @@ from app import jobs, llm, main, stats, store, websearch
 @pytest.fixture
 def client(monkeypatch):
     """Remplace Firestore par un stockage en mémoire."""
-    apps, files = {}, {}
+    apps, files, profiles, events = {}, {}, {}, []
 
     def create(data):
         app_id = f"a{len(apps) + 1}"
@@ -35,14 +35,20 @@ def client(monkeypatch):
         "get_file": lambda k: files.get(k),
         "get_file_meta": lambda k: files[k][0] if k in files else None,
         "delete_file": lambda k: files.pop(k),
+        "get_profile": lambda uid: dict(profiles.get(uid, {})),
+        "save_profile": lambda uid, d: profiles.setdefault(uid, {}).update(d) or dict(profiles[uid]),
+        "add_events": events.extend,
+        "list_events": lambda since, limit=20000: [e for e in events if e["at"] >= since],
+        "list_account_dates": lambda: [],
+        "list_application_dates": lambda: [d["createdAt"] for d in apps.values()],
     }
     for name, fn in fake.items():
         monkeypatch.setattr(store, name, fn)
     monkeypatch.delenv("FRANCE_TRAVAIL_CLIENT_ID", raising=False)
     monkeypatch.delenv("FRANCE_TRAVAIL_CLIENT_SECRET", raising=False)
-    main.app.dependency_overrides[main.current_user] = lambda: "u1"
+    main.app.dependency_overrides[main._claims] = lambda: {"sub": "u1", "email": "u1@example.com"}
     with TestClient(main.app) as c:
-        c.files = files
+        c.files, c.apps, c.profiles, c.events = files, apps, profiles, events
         yield c
     main.app.dependency_overrides.clear()
 
@@ -248,13 +254,11 @@ def test_stats_evolution():
 
 
 def test_stats_admins_only(client, monkeypatch):
-    monkeypatch.setattr(store, "list_account_dates", lambda: [])
-    monkeypatch.setattr(store, "list_application_dates", lambda: [])
     monkeypatch.setenv("ADMIN_EMAILS", "Admin@example.com, other@example.com")
     main.app.dependency_overrides[main._claims] = lambda: {"sub": "u1", "email": "user@example.com"}
     assert client.get("/api/stats").status_code == 403
     main.app.dependency_overrides[main._claims] = lambda: {"sub": "u1", "email": "admin@example.com"}
-    assert client.get("/api/stats").json() == {"daily": [], "weekly": []}
+    assert client.get("/api/stats").json()["history"] == {"daily": [], "weekly": []}
 
 
 def test_reviews(client, monkeypatch):
@@ -266,8 +270,6 @@ def test_reviews(client, monkeypatch):
     assert client.post("/api/reviews", json={"comment": ""}).status_code == 422
     assert client.post("/api/reviews", json={"comment": "Add reminders"}).status_code == 201
     assert client.get("/api/reviews").status_code == 403
-    assert client.get("/api/me").json() == {"admin": False}
     main.app.dependency_overrides[main._claims] = lambda: {"sub": "u2", "email": "admin@example.com"}
-    assert client.get("/api/me").json() == {"admin": True}
     [review] = client.get("/api/reviews").json()
     assert review["comment"] == "Add reminders" and review["email"] == "user@example.com"

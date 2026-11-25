@@ -5,7 +5,7 @@ const SECTION_KINDS = ["offerLink", "keyPoints", "company", "cv", "letter", "con
 const REPEATABLE = ["conversation", "custom"];
 const DEFAULT_SECTIONS = { regular: ["offerLink", "keyPoints", "cv"], spontaneous: ["cv"] };
 const CONVERSATION_REQUIRED = ["name", "handle", "platform"];
-const NEW_ITEM = { extra: { label: "", value: "" }, messages: { date: "", text: "" } };
+const NEW_ITEM = { extra: { label: "", value: "" }, messages: { date: "", from: "them", text: "" } };
 const KEY_FIELDS = ["contract", "salary", "workMode", "experience", "start"];
 const KEY_LISTS = ["responsibilities", "requirements"];
 
@@ -23,15 +23,19 @@ const ICONS = {
   file: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/>',
   fileCheck: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/><path d="M9 13l2 2 4-4"/>',
   mail: '<path d="M3 5h18v14H3z"/><path d="M3 6l9 7 9-7"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
   star: '<path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/>',
   chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  building: '<path d="M4 21V5l8-3v19M12 21V9l8 3v9M2 21h20"/><path d="M7 8h2M7 12h2M7 16h2M15 14h2M15 17h2"/>',
+  expand: '<path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/>',
+  spark: '<path d="M12 3v5M12 16v5M3 12h5M16 12h5M6 6l3 3M15 15l3 3M18 6l-3 3M9 15l-3 3"/>',
   link: '<path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1"/><path d="M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1"/>',
 };
 const GRIP = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="#9CA3AF">'
   + [6, 12, 18].map((y) => `<circle cx="9" cy="${y}" r="1.6"/><circle cx="15" cy="${y}" r="1.6"/>`).join("") + "</svg>";
 
 let userId; // undefined tant que Firebase n'a pas répondu, null si déconnecté
-let isAdmin = false;
+let me = null; // { uid, admin, llm } renvoyé par /api/me
 let apps = [];
 let appsLoaded = false;
 let rerender = () => {};
@@ -55,7 +59,10 @@ async function api(path, options = {}) {
   });
   if (resp.status === 204) return null;
   const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw Object.assign(new Error(data.detail || `Error ${resp.status}`), { status: resp.status });
+  if (!resp.ok) {
+    if (resp.status !== 401) track("client_error", { ok: false, error: `${options.method || "GET"} ${path.split("?")[0].replace(/\/[\w-]{12,}/g, "/:id")} ${resp.status}` });
+    throw Object.assign(new Error(data.detail || `Error ${resp.status}`), { status: resp.status });
+  }
   return data;
 }
 
@@ -106,20 +113,25 @@ async function loadApps() {
 
 // ---------- Barre latérale et routes ----------
 
+const NAV = [
+  ["offers", "search", "nav.offers"],
+  ["companies", "building", "nav.companies"],
+  ["agent", "link", "nav.agent"],
+  ["profile", "user", "nav.profile"],
+];
+
 function renderNav() {
-  const offers = location.hash.startsWith("#/offers");
-  const agent = location.hash.startsWith("#/agent");
-  const review = location.hash.startsWith("#/review");
+  const page = location.hash.split("/")[1] || "";
   const current = (on) => (on ? ' aria-current="page"' : "");
+  const links = NAV.map(([key, ic, label]) => `<a href="#/${key}"${current(page === key)}>${icon(ic, 18)}<span>${t(label)}</span></a>`).join("");
   document.getElementById("nav").innerHTML = userId ? `
-    <a href="#/"${current(!offers && !agent && !review)}>${icon("inbox", 18)}<span class="grow">${t("nav.box")}</span><span class="count">${apps.length}</span></a>
-    <a href="#/offers"${current(offers)}>${icon("search", 18)}<span>${t("nav.offers")}</span></a>
-    <a href="#/agent"${current(agent)}>${icon("link", 18)}<span>${t("nav.agent")}</span></a>
-    ${isAdmin
-      ? `<a href="/stats">${icon("chart", 18)}<span>${t("nav.stats")}</span></a>`
-      : `<a href="#/review"${current(review)}>${icon("star", 18)}<span>${t("nav.review")}</span></a>`}
-    <a href="#/signout">${icon("back", 18)}<span>${t("nav.signOut")}</span></a>` : "";
-  document.getElementById("lang").innerHTML = Object.keys(LOCALES)
+    <a href="#/"${current(!NAV.some(([key]) => key === page) && !["stats", "review"].includes(page))}>${icon("inbox", 18)}<span class="grow">${t("nav.box")}</span><span class="count">${apps.length}</span></a>
+    ${links}
+    ${me?.admin
+      ? `<a href="#/stats"${current(page === "stats")}>${icon("chart", 18)}<span>${t("nav.stats")}</span></a>`
+      : `<a href="#/review"${current(page === "review")}>${icon("star", 18)}<span>${t("nav.review")}</span></a>`}` : "";
+  // Connecté, la langue se choisit dans le profil.
+  document.getElementById("lang").innerHTML = userId ? "" : Object.keys(LOCALES)
     .map((code) => `<button type="button" data-lang="${code}" aria-pressed="${code === lang}">${code.toUpperCase()}</button>`)
     .join("");
 }
@@ -128,6 +140,7 @@ document.getElementById("lang").onclick = (e) => {
   const code = e.target.dataset.lang;
   if (!code) return;
   setLang(code);
+  track("lang_changed", { to: code });
   renderNav();
   rerender();
 };
@@ -140,11 +153,17 @@ function route() {
   renderNav();
   if (!userId) return showLogin();
   if (page === "signout") {
+    track("signed_out");
+    flushEvents();
     location.hash = "#/";
     return authApi.signOut();
   }
+  track("$pageview", { page: pageName(location.hash) });
   if (page === "offers") return showOfferSearch();
+  if (page === "companies") return showCompanies();
   if (page === "agent") return showAgent();
+  if (page === "profile") return showProfile();
+  if (page === "stats") return showStats();
   if (page === "review") return showReview();
   if (page === "new") return showNew();
   if (page === "a" && sub === "edit") return showEdit(id);
@@ -156,7 +175,7 @@ window.onhashchange = route;
 
 // ---------- Box ----------
 
-const box = { filter: "all", menuOpen: false, ioOpen: false, view: "date", closed: new Set(), notice: null, query: "" };
+const box = { filter: "all", menuOpen: false, query: "", ioOpen: false, view: "date", closed: new Set(), notice: null };
 
 async function showBox() {
   view.className = "list";
@@ -270,6 +289,7 @@ function appRow(a) {
     <div class="row">
       <div class="col-main">${logo(a.company)}
         <a class="row-link" href="#/a/${a.id}"><strong>${esc(a.company)}</strong><span>${esc(a.jobTitle || (a.type === "spontaneous" ? t("type.spontaneous") : ""))}</span></a>
+        ${nextStepTag(a)}
       </div>
       <div class="col-status">${statusTag(a.status)}</div>
       <div class="col-date">${fmtDate(a.lastStatusChangeAt)}</div>
@@ -313,14 +333,27 @@ async function showDetail(id) {
     view.innerHTML = backLink("#/", t("back.box")) + `<div class="banner error" role="status">${esc(err.message)}</div>`;
     return;
   }
-  const expanded = { letter: false };
-  rerender = () => renderDetail(app, expanded);
+  overlaid = "";
+  const expanded = { prep: !app.prep }; // préparation repliée dès qu'elle existe
+  const prep = { loading: false, error: "" };
+  rerender = () => renderDetail(app, expanded, prep);
   rerender();
-  view.onclick = (e) => {
-    if (e.target.closest("[data-expand-letter]")) {
-      expanded.letter = true;
+  view.onclick = async (e) => {
+    const expand = e.target.closest("[data-expand]");
+    if (expand) {
+      e.preventDefault(); // dans l'en-tête de la préparation, ne pas la replier
+      overlaid = overlaid === expand.dataset.expand ? "" : expand.dataset.expand;
+      return rerender();
+    }
+    const summary = e.target.closest("#prep > summary");
+    if (summary) expanded.prep = !summary.parentElement.open; // le clic précède l'ouverture native
+    if (e.target.closest("[data-prep]")) {
+      expanded.prep = true;
+      const updated = await runPrep(app, prep, rerender);
+      if (updated) app = updated;
       rerender();
     }
+    if (e.target.closest("[data-copy-prep]")) navigator.clipboard.writeText(app.prep.text);
   };
 }
 
@@ -328,8 +361,24 @@ function paras(text) {
   return text.split(/\n\s*\n/).map((p) => `<p>${esc(p.trim())}</p>`).join("");
 }
 
-function card(title, body, { cls = "", aside = "" } = {}) {
-  return `<section class="card ${cls}"><div class="card-head"><h2>${title}</h2>${aside}</div><div class="card-body">${body}</div></section>`;
+// Carte de la page candidature affichée par-dessus le reste (clé de la carte, ou "").
+let overlaid = "";
+
+addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && overlaid) {
+    overlaid = "";
+    rerender();
+  }
+});
+
+function expandButton(key) {
+  const open = overlaid === key;
+  return `<button class="icon-btn" type="button" data-expand="${key}" aria-label="${t(open ? "card.close" : "card.expand")}">${icon(open ? "close" : "expand", 16, 'stroke="currentColor" stroke-width="2"')}</button>`;
+}
+
+function card(title, body, { cls = "", aside = "", key = "" } = {}) {
+  const over = key && overlaid === key ? " overlaid" : "";
+  return `<section class="card ${cls}${over}"><div class="card-head"><h2>${title}</h2><div class="head-tools">${aside}${key ? expandButton(key) : ""}</div></div><div class="card-body">${body}</div></section>`;
 }
 
 function kv(key, value) {
@@ -344,7 +393,7 @@ function keyPointsCard(s) {
   if (!values && !lists) return "";
   return card(t("section.keyPoints"),
     (values ? `<div class="key-values">${values}</div>` : "") + (lists ? `<div class="key-lists">${lists}</div>` : ""),
-    { cls: "key" });
+    { cls: "key", key: "keyPoints" });
 }
 
 function whyBlock(text, labelKey) {
@@ -354,14 +403,14 @@ function whyBlock(text, labelKey) {
 function companyCard(s) {
   if (!s || !(s.summary || s.why)) return "";
   return card(t("section.company"),
-    (s.summary ? `<div class="prose">${paras(s.summary)}</div>` : "") + whyBlock(s.why, "key.whyCompany"));
+    (s.summary ? `<div class="prose clamp">${paras(s.summary)}</div>` : "") + whyBlock(s.why, "key.whyCompany"), { key: "company" });
 }
 
 function offerCard(s) {
   if (!s?.rawText && !s?.url) return "";
   const open = s.url ? `<a class="link" href="${esc(s.url)}" target="_blank" rel="noopener">${t("detail.openOriginal")}</a>` : "";
-  const body = s.rawText ? `<div class="prose scroll">${paras(s.rawText)}</div>` : `<a class="link" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url)}</a>`;
-  return card(t("detail.jobOffer"), body, { cls: "wide", aside: open });
+  const body = s.rawText ? `<div class="prose clamp">${paras(s.rawText)}</div>` : `<a class="link" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url)}</a>`;
+  return card(t("detail.jobOffer"), body, { cls: "wide", aside: open, key: "offer" });
 }
 
 function cvCard(s, app, cls) {
@@ -378,7 +427,7 @@ function cvCard(s, app, cls) {
           <a class="btn" href="${fileUrl(f, true)}">${t("file.download")}</a>
         </div>
       </div>
-    </div>`, { cls });
+    </div>`, { cls, key: "cv" });
 }
 
 function contactCard(s) {
@@ -390,31 +439,33 @@ function contactCard(s) {
   if (s.phone) parts.push(kv(t("contact.phone"), `<a class="link" href="tel:${esc(s.phone.replace(/\s/g, ""))}">${esc(s.phone)}</a>`));
   if (s.email) parts.push(kv(t("contact.email"), `<a class="link" href="mailto:${esc(s.email)}">${esc(s.email)}</a>`));
   for (const x of s.extra || []) if (x.value) parts.push(kv(esc(x.label), esc(x.value)));
-  return parts.length ? card(t("detail.contact"), parts.join(""), { cls: "contact" }) : "";
+  return parts.length ? card(t("detail.contact"), parts.join(""), { cls: "contact", key: "contact" }) : "";
 }
 
 function conversationCards(app, main = false) {
-  return app.sections.filter((s) => s.kind === "conversation").map((s) => {
+  return app.sections.filter((s) => s.kind === "conversation").map((s, i) => {
     const who = `<div class="mail-meta${main ? " inline" : ""}"><span>${esc(s.name)}</span><div>${esc(s.platform)}: <span>${esc(s.handle)}</span></div></div>`;
     const messages = (s.messages || []).filter((m) => m.text).map((m) => `<div class="rule"></div>
-      ${m.date ? `<div class="micro">${fmtDate(m.date)}</div>` : ""}<div class="prose${main ? " big" : ""}">${paras(m.text)}</div>`).join("");
-    return card(t("section.conversation"), who + messages, { cls: main ? "key" : "" });
+      <div class="micro">${m.date ? `${fmtDate(m.date)} · ` : ""}${esc(sender(s, m.from))}</div><div class="prose${main ? " big" : ""}">${paras(m.text)}</div>`).join("");
+    return card(t("section.conversation"), who + (messages ? `<div class="clamp">${messages}</div>` : ""), { cls: main ? "key" : "", key: `conv${i}` });
   }).join("");
 }
 
-function letterCard(s, expanded) {
+// Auteur d'un message : la personne de la conversation ou l'utilisateur.
+function sender(conversation, from) {
+  return from === "me" ? t("conv.me") : conversation.name || t("conv.them");
+}
+
+function letterCard(s) {
   if (!s || !(s.file || s.text)) return "";
-  const paragraphs = (s.text || "").split(/\n\s*\n/);
-  const cut = !expanded && paragraphs.length > 2;
-  let body = s.text ? `<div class="prose">${paras(cut ? paragraphs.slice(0, 2).join("\n\n") : s.text)}${cut ? '<p class="more">…</p>' : ""}</div>` : "";
+  let body = s.text ? `<div class="prose clamp">${paras(s.text)}</div>` : "";
   if (s.file) body += `<div class="actions"><a class="btn" href="${fileUrl(s.file)}" target="_blank" rel="noopener">${t("detail.openLetter")}</a></div>`;
-  else if (cut) body += `<div class="actions"><button class="btn" type="button" data-expand-letter>${t("detail.openLetter")}</button></div>`;
-  return card(t("section.letter"), body, { aside: s.file ? `<span class="meta">${esc(s.file.name)}</span>` : "" });
+  return card(t("section.letter"), body, { aside: s.file ? `<span class="meta">${esc(s.file.name)}</span>` : "", key: "letter" });
 }
 
 function customCards(app) {
   return app.sections.filter((s) => s.kind === "custom" && (s.title || s.content))
-    .map((s) => card(esc(s.title || t("section.custom")), `<div class="prose">${paras(s.content)}</div>`)).join("");
+    .map((s, i) => card(esc(s.title || t("section.custom")), `<div class="prose clamp">${paras(s.content)}</div>`, { key: `custom${i}` })).join("");
 }
 
 function row(...cards) {
@@ -422,19 +473,21 @@ function row(...cards) {
   return html ? `<div class="cards">${html}</div>` : "";
 }
 
-function renderDetail(app, expanded) {
+function renderDetail(app, expanded, prep) {
   const regular = app.type === "regular";
   const dates = [t("detail.updated", { date: fmtDate(app.lastStatusChangeAt) })];
   if (app.sentAt) dates.push(t("detail.sent", { date: fmtDate(app.sentAt) }));
   const reference = [contactCard(section(app, "contact"))];
   const blocks = regular
     ? [keyPointsCard(section(app, "keyPoints") || {}),
+       prepCard(app, prep, expanded.prep),
        row(companyCard(section(app, "company"))),
        row(offerCard(section(app, "offerLink")), cvCard(section(app, "cv"), app, "narrowish")),
-       row(...reference, conversationCards(app), letterCard(section(app, "letter"), expanded.letter), customCards(app))]
+       row(...reference, conversationCards(app), letterCard(section(app, "letter")), customCards(app))]
     : [conversationCards(app, true),
+       prepCard(app, prep, expanded.prep),
        row(companyCard(section(app, "company"))),
-       row(...reference, cvCard(section(app, "cv"), app), letterCard(section(app, "letter"), expanded.letter), customCards(app))];
+       row(...reference, cvCard(section(app, "cv"), app), letterCard(section(app, "letter")), customCards(app))];
 
   view.innerHTML = `
     ${backLink("#/", t("back.box"))}
@@ -452,7 +505,12 @@ function renderDetail(app, expanded) {
         <a class="btn" href="#/a/${app.id}/edit">${icon("edit")}${t("detail.edit")}</a>
       </div>
     </header>
-    ${blocks.filter(Boolean).join("")}`;
+    ${nextStepBanner(app)}
+    ${blocks.filter(Boolean).join("")}
+    ${repliesCard(app)}
+    ${overlaid ? '<div class="backdrop" data-expand=""></div>' : ""}`;
+  // Fondu en bas des textes coupés : la carte agrandie les montre en entier.
+  for (const el of view.querySelectorAll(".clamp")) el.classList.toggle("cut", el.scrollHeight > el.clientHeight);
 }
 
 // ---------- Formulaire (création et modification) ----------
@@ -592,8 +650,13 @@ function sectionBody(s) {
         + input("why", t("form.whyCompany"), { value: s.why, sec: id, ph: t("ph.why"), area: 3 });
     case "cv":
       return dropZone(s, "form.dropCv");
-    case "letter":
-      return dropZone(s, "form.dropLetter") + input("text", t("form.letterText"), { value: s.text, sec: id, ph: t("form.letterPh"), area: 4 });
+    case "letter": {
+      const writing = s._ai === "loading";
+      return dropZone(s, "form.dropLetter") + input("text", t("form.letterText"), { value: s.text, sec: id, ph: t("form.letterPh"), area: 4, attrs: writing ? "disabled" : "" })
+        + `<div><button class="btn" type="button" data-action="suggest-letter" data-sec="${id}" ${writing ? "disabled" : ""}>${icon("spark")}${t("suggest.letter")}</button></div>`
+        + (writing ? `<p class="banner loading" role="status">${t("suggest.loading")}</p>` : "")
+        + (s._ai === "error" ? `<p class="banner error" role="status">${esc(s._aiError)}</p>` : "");
+    }
     case "conversation":
       return `<div class="fields">
           ${input("name", t("form.name"), { value: s.name, sec: id, ph: t("ph.name"), attrs: "required" })}
@@ -602,6 +665,8 @@ function sectionBody(s) {
         ${s.messages.map((m, i) => `<div class="rule"></div>
           <div class="fields">
             ${input("date", t("form.date"), { type: "date", value: m.date, sec: id, attrs: `data-list="messages" data-i="${i}"` })}
+            <label class="lbl"><span>${t("form.from")}</span><select class="field" data-key="from" data-sec="${id}" data-list="messages" data-i="${i}">
+              ${["them", "me"].map((v) => `<option value="${v}" ${m.from === v ? "selected" : ""}>${esc(sender(s, v))}</option>`).join("")}</select></label>
             ${removeItemButton(id, "messages", i, t("form.removeMessage"))}</div>
           ${input("text", t("form.message"), { value: m.text, sec: id, ph: t("ph.message"), area: 4, attrs: `data-list="messages" data-i="${i}"` })}`).join("")}
         <div>${addItemButton(id, "messages", t("form.addMessage"))}</div>`;
@@ -777,6 +842,8 @@ function onFormClick(e) {
       return el.previousElementSibling.click();
     case "fetch":
       return fetchOffer();
+    case "suggest-letter":
+      return suggestLetter(s);
     case "delete":
       return deleteApplication();
   }
@@ -835,7 +902,7 @@ async function saveForm() {
       s.file = await api(`/api/files?name=${encodeURIComponent(s._pending.name)}`, { method: "POST", body: s._pending });
       delete s._pending;
     }
-    const sections = f.sections.map(({ _pending, paste, ...s }) => {
+    const sections = f.sections.map(({ _pending, _ai, _aiError, paste, ...s }) => {
       if (s.kind === "offerLink" && paste?.trim()) s.rawText = paste.trim();
       if (s.kind === "keyPoints") for (const k of KEY_LISTS) s[k] = s[k].split("\n").map((l) => l.trim()).filter(Boolean);
       return s;
@@ -895,20 +962,13 @@ async function showAgent() {
 
 // ---------- Avis ----------
 
-const REVIEW_FORM = () => `
-  <form class="login">
-    <label class="lbl"><span>${t("review.comment")}</span><textarea class="field" name="comment" required></textarea></label>
-    <button class="btn btn-primary">${t("review.send")}</button>
-    <p class="banner" role="status" hidden></p>
-  </form>`;
-
 async function sendReview(e) {
   e.preventDefault();
-  const form = e.target;
-  const banner = form.querySelector(".banner");
+  const reviewForm = e.target;
+  const banner = reviewForm.querySelector(".banner");
   try {
-    await api("/api/reviews", { method: "POST", body: { comment: form.elements.comment.value } });
-    form.reset();
+    await api("/api/reviews", { method: "POST", body: { comment: reviewForm.elements.comment.value } });
+    reviewForm.reset();
     banner.className = "banner success";
     banner.textContent = t("review.thanks");
   } catch (err) {
@@ -921,7 +981,12 @@ async function sendReview(e) {
 function showReview() {
   view.className = "list";
   rerender = showReview;
-  view.innerHTML = `<h1>${t("nav.review")}</h1><p>${t("review.intro")}</p>${REVIEW_FORM()}`;
+  view.innerHTML = `<h1>${t("nav.review")}</h1><p>${t("review.intro")}</p>
+    <form class="login">
+      <label class="lbl"><span>${t("review.comment")}</span><textarea class="field" name="comment" required></textarea></label>
+      <button class="btn btn-primary">${t("review.send")}</button>
+      <p class="banner" role="status" hidden></p>
+    </form>`;
   view.onsubmit = sendReview;
 }
 
@@ -1017,19 +1082,22 @@ function hostOf(url) {
 
 // ---------- Connexion ----------
 
-function onAuth(user) {
+async function onAuth(user) {
   const id = user ? user.uid : null;
   if (id === userId) return; // simple renouvellement du jeton
   userId = id;
   apps = [];
   appsLoaded = false;
-  isAdmin = false;
+  me = null;
+  tracker.enabled = false;
+  if (userId) {
+    try {
+      me = await api("/api/me");
+      tracker.enabled = true;
+    } catch {}
+  }
   route();
-  if (userId) api("/api/me").then((me) => {
-    isAdmin = me.admin;
-    renderNav();
-    if (!isAdmin) showReviewPopup();
-  }).catch(() => {});
+  if (me && !me.admin) showReviewPopup();
   if (userId && location.hash.split("/")[1]) loadApps().catch(() => {}); // Box charge déjà la liste
 }
 

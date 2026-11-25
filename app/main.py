@@ -1,10 +1,11 @@
-"""Helper : centre de suivi des candidatures."""
+"""Helper : centre de suivi des candidatures, avec assistant IA et statistiques d'usage."""
 
 import asyncio
 import csv
 import io
 import json
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -21,12 +22,13 @@ from pydantic import BaseModel, Field, ValidationError
 
 load_dotenv()
 
-from . import jobs, llm, offer, stats, store, websearch  # noqa: E402  (après load_dotenv)
+from . import analytics, companies, jobs, llm, offer, prompts, replies, stats, store, websearch  # noqa: E402  (après load_dotenv)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 MAX_FILE_BYTES = 10_000_000
 SECTION_KINDS = {"offerLink", "keyPoints", "company", "cv", "letter", "conversation", "contact", "custom"}
 OFFER_KINDS = {"offerLink", "keyPoints"}
+Lang = Literal["fr", "en"]
 CONVERSATION_REQUIRED = ("name", "handle", "platform")
 DATE_KEYS = ("createdAt", "lastStatusChangeAt", "sentAt")
 CONTACT_COLUMNS = {"contactName": "name", "contactPosition": "position", "contactEmail": "email", "contactPhone": "phone"}
@@ -54,6 +56,56 @@ class OfferRequest(BaseModel):
     withCompany: bool = False
 
 
+class ProfileIn(BaseModel):
+    cvs: list[dict] = []
+
+
+class ReplyRequest(BaseModel):
+    message: str
+    applicationId: str = ""
+
+
+class PrepRequest(BaseModel):
+    lang: Lang = "fr"
+
+
+class WriteRequest(BaseModel):
+    kind: Literal["letter", "email"]
+    offer: str = ""
+    company: str = ""
+    extra: str = ""
+    received: str = ""
+    goal: str = "reply"
+    tone: str = ""
+    lang: Lang = "fr"
+
+
+class CompanySearchIn(BaseModel):
+    what: str
+    where: str
+    radius: float = 10
+    minSize: int = 1
+    page: int = 1
+    activities: list[str] = []
+
+
+class CompanyContactIn(BaseModel):
+    name: str
+    city: str = ""
+
+
+class SpontaneousIn(BaseModel):
+    company: dict
+    what: str = ""
+    description: str = ""
+    lang: Lang = "fr"
+
+
+class EventsIn(BaseModel):
+    events: list[dict]
+    session: str = ""
+
+
 @app.get("/")
 def index():
     return FileResponse(STATIC_DIR / "index.html")
@@ -72,45 +124,41 @@ def current_user(claims: dict = Depends(_claims)) -> str:
     return claims["sub"]
 
 
-def _is_admin(claims: dict) -> bool:
+def is_admin(claims: dict = Depends(_claims)) -> bool:
     admins = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
     return claims.get("email", "").lower() in admins
 
 
-def admin_user(claims: dict = Depends(_claims)) -> None:
-    if not _is_admin(claims):
-        raise HTTPException(status_code=403, detail="Administrators only.")
+def _ai_error(uid: str, event: str, started: float, exc: Exception) -> None:
+    analytics.capture(uid, event, {"ok": False, "ms": _ms(started), "error": type(exc).__name__})
 
+
+def _ms(started: float) -> int:
+    return round((time.monotonic() - started) * 1000)
+
+
+# ---------- Compte et profil ----------
 
 @app.get("/api/me")
-def me(claims: dict = Depends(_claims)):
-    return {"admin": _is_admin(claims)}
+def me(uid: str = Depends(current_user), admin: bool = Depends(is_admin)):
+    return {"uid": uid, "admin": admin, "llm": llm.is_configured()}
 
 
-# ---------- Statistiques ----------
-
-@app.get("/stats")
-def stats_page():
-    return FileResponse(STATIC_DIR / "stats.html")
+@app.get("/api/profile")
+def get_profile(uid: str = Depends(current_user)):
+    return {"cvs": store.get_profile(uid).get("cvs", [])}
 
 
-@app.get("/api/stats", dependencies=[Depends(admin_user)])
-def get_stats():
-    return stats.evolution(store.list_account_dates(), store.list_application_dates(),
-                           datetime.now(timezone.utc).date())
-
-
-# ---------- Avis ----------
-
-@app.post("/api/reviews", status_code=201)
-def create_review(data: ReviewIn, claims: dict = Depends(_claims)):
-    store.create_review({**data.model_dump(), "uid": claims["sub"], "email": claims.get("email", ""),
-                         "createdAt": store.now()})
-
-
-@app.get("/api/reviews", dependencies=[Depends(admin_user)])
-def list_reviews():
-    return sorted(store.list_reviews(), key=lambda r: r["createdAt"], reverse=True)
+@app.put("/api/profile")
+def put_profile(data: ProfileIn, uid: str = Depends(current_user)):
+    """CV du profil : des PDF avec un titre, que l'IA ne lit pas."""
+    if not all(cv.get("title", "").strip() and (cv.get("file") or {}).get("id") for cv in data.cvs):
+        raise HTTPException(status_code=400, detail="Each CV needs a title and a PDF.")
+    old = store.get_profile(uid).get("cvs", [])
+    saved = store.save_profile(uid, {"cvs": data.cvs})
+    _delete_files(_file_ids(old) - _file_ids(data.cvs), uid)
+    analytics.capture(uid, "profile_saved", {"cvs": len(data.cvs)})
+    return {"cvs": saved.get("cvs", [])}
 
 
 # ---------- Candidatures ----------
@@ -171,6 +219,8 @@ def get_application(app_id: str, uid: str = Depends(current_user)):
 @app.post("/api/applications", status_code=201)
 def create_application(data: ApplicationIn, uid: str = Depends(current_user)):
     _validate(data)
+    analytics.capture(uid, "application_created", {"type": data.type, "status": data.status,
+                                                   "sections": len(data.sections)})
     return store.create_application(_new_record(data, uid))
 
 
@@ -185,6 +235,7 @@ def update_application(app_id: str, data: ApplicationIn, uid: str = Depends(curr
         record["lastStatusChangeAt"] = store.now()
         if data.status != "notsent" and not old.get("sentAt"):
             record["sentAt"] = record["lastStatusChangeAt"]
+        analytics.capture(uid, "status_changed", {"from": old["status"], "to": data.status, "source": "form"})
     saved = store.update_application(app_id, record)
     _delete_files(_file_ids(old["sections"]) - _file_ids(data.sections), uid)
     return saved
@@ -195,6 +246,101 @@ def delete_application(app_id: str, uid: str = Depends(current_user)):
     application = get_application(app_id, uid)
     _delete_files(_file_ids(application["sections"]), uid)
     store.delete_application(app_id)
+    analytics.capture(uid, "application_deleted", {"status": application["status"]})
+
+
+# ---------- Réponses de recruteurs et préparation d'entretien ----------
+
+@app.post("/api/replies")
+async def recruiter_reply(req: ReplyRequest, uid: str = Depends(current_user)):
+    """Message d'un recruteur → candidature retrouvée (ou créée) et mise à jour."""
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="Paste the recruiter's message.")
+    started = time.monotonic()
+    target = get_application(req.applicationId, uid) if req.applicationId else None
+    own = store.list_applications(uid)
+    try:
+        info = await replies.analyze_reply(req.message, own)
+    except llm.LLMError as exc:
+        _ai_error(uid, "reply_analyzed", started, exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if target is None:
+        target = replies.find_application(own, info.get("entreprise", ""), info.get("poste", ""))
+    created = target is None
+    record = replies.apply_reply(replies.new_application(info) if created else target, info, req.message)
+    record["uid"] = uid
+    if created:
+        saved = store.create_application(record)
+    else:
+        saved = store.update_application(target["id"], record)
+        if record["status"] != target["status"]:
+            analytics.capture(uid, "status_changed", {"from": target["status"], "to": record["status"], "source": "reply"})
+    analytics.capture(uid, "reply_analyzed", {"ok": True, "ms": _ms(started), "type": info["type_reponse"],
+                                              "created": created, "manual": bool(req.applicationId)})
+    return {"application": saved, "analysis": info, "created": created,
+            "prepare": info["type_reponse"] in replies.PREPARE_FOR}
+
+
+def _cv_for(record: dict, uid: str) -> str:
+    """Texte du CV envoyé pour cette candidature (PDF de la section CV), vide s'il n'y en a pas."""
+    file_id = (replies.section(record, "cv").get("file") or {}).get("id")
+    found = store.get_file(file_id) if file_id else None
+    if found and found[0].get("uid") == uid:
+        try:
+            text = _pdf_text(found[1])
+            if text.strip():
+                return text
+        except HTTPException:
+            pass
+    return ""
+
+
+@app.post("/api/applications/{app_id}/prep")
+async def interview_prep(app_id: str, req: PrepRequest, uid: str = Depends(current_user)):
+    record = get_application(app_id, uid)
+    started = time.monotonic()
+    fetched = await replies.fetch_offer(record)
+    if fetched:  # on garde le texte lu pour les prochaines préparations
+        link = replies.section(record, "offerLink")
+        link["rawText"] = fetched
+    profile = {"cv": _cv_for(record, uid)}
+    try:
+        text, steps = await replies.prepare(record, profile, req.lang)
+    except llm.LLMError as exc:
+        _ai_error(uid, "prep_generated", started, exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    record = {k: v for k, v in record.items() if k != "id"}
+    record["prep"] = {"text": text, "at": store.now(), "lang": req.lang, "steps": steps}
+    analytics.capture(uid, "prep_generated", {"ok": True, "ms": _ms(started), "lang": req.lang,
+                                              "has_offer": bool(replies.offer_text(record)),
+                                              "research": len([s for s in steps if " : " not in s])})
+    return store.update_application(app_id, record)
+
+
+# ---------- Rédaction ----------
+
+@app.post("/api/write")
+async def write(req: WriteRequest, uid: str = Depends(current_user)):
+    """Lettre de motivation ou e-mail au recruteur."""
+    profile = {}  # le profil ne contient plus que des CV en PDF, que l'IA ne lit pas
+    if req.kind == "letter":
+        if not req.offer.strip():
+            raise HTTPException(status_code=400, detail="Paste the job offer.")
+        messages = prompts.cover_letter_messages(profile, req.offer, req.company, req.extra, req.lang)
+    else:
+        if req.goal not in prompts.EMAIL_GOALS:
+            raise HTTPException(status_code=400, detail="Unknown email goal.")
+        messages = prompts.email_messages(profile, req.received, req.goal, req.tone, req.extra, req.lang)
+    started = time.monotonic()
+    try:
+        text = await llm.chat(messages, 0.5)
+    except llm.LLMError as exc:
+        _ai_error(uid, "text_written", started, exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    analytics.capture(uid, "text_written", {"ok": True, "ms": _ms(started), "kind": req.kind,
+                                            "goal": req.goal if req.kind == "email" else ""})
+    return {"text": text}
 
 
 # ---------- Import / export ----------
@@ -278,17 +424,27 @@ async def import_applications(fmt: Literal["csv", "json"], request: Request, uid
 
 # ---------- Fichiers PDF ----------
 
-def _read_pdf(content: bytes) -> tuple[int, bytes]:
-    """Renvoie le nombre de pages et un aperçu PNG de la première page."""
+def _open_pdf(content: bytes) -> pdfium.PdfDocument:
     try:
-        pdf = pdfium.PdfDocument(content)
+        return pdfium.PdfDocument(content)
     except pdfium.PdfiumError as exc:
         raise HTTPException(status_code=400, detail="This file is not a valid PDF.") from exc
+
+
+def _read_pdf(content: bytes) -> tuple[int, bytes]:
+    """Renvoie le nombre de pages et un aperçu PNG de la première page."""
+    pdf = _open_pdf(content)
     page = pdf[0]
     image = page.render(scale=224 / page.get_width()).to_pil()
     buffer = io.BytesIO()
     image.save(buffer, format="PNG", optimize=True)
     return len(pdf), buffer.getvalue()
+
+
+def _pdf_text(content: bytes, max_chars: int = 8000) -> str:
+    pdf = _open_pdf(content)
+    text = "\n".join(page.get_textpage().get_text_range() for page in pdf)
+    return text.replace("\r\n", "\n").strip()[:max_chars]
 
 
 @app.post("/api/files", status_code=201)
@@ -299,6 +455,7 @@ async def upload_file(request: Request, name: str, uid: str = Depends(current_us
     pages, preview = _read_pdf(content)
     meta = {"name": name, "pages": pages, "addedAt": store.now()}
     file_id = store.save_file({**meta, "uid": uid, "preview": preview}, content)
+    analytics.capture(uid, "file_uploaded", {"pages": pages})
     return {**meta, "id": file_id}
 
 
@@ -323,20 +480,27 @@ def file_preview(file_id: str, uid: str = Depends(current_user)):
 
 # ---------- Offres ----------
 
-@app.post("/api/offer/summary", dependencies=[Depends(current_user)])
-async def summarize_offer(req: OfferRequest):
+@app.post("/api/offer/summary")
+async def summarize_offer(req: OfferRequest, uid: str = Depends(current_user)):
     if not req.url.strip() and not req.text.strip():
         raise HTTPException(status_code=400, detail="Give a link or paste the offer text.")
+    started = time.monotonic()
     try:
-        return await offer.summarize(req.url, req.text, req.withCompany)
+        result = await offer.summarize(req.url, req.text, req.withCompany)
     except websearch.WebSearchError as exc:
+        _ai_error(uid, "offer_summarized", started, exc)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except llm.LLMError as exc:
+        _ai_error(uid, "offer_summarized", started, exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    analytics.capture(uid, "offer_summarized", {"ok": True, "ms": _ms(started), "from_url": not req.text.strip(),
+                                                "with_company": req.withCompany})
+    return result
 
 
-@app.get("/api/jobs", dependencies=[Depends(current_user)])
-async def search_jobs(q: str = "", location: str = "", department: str = "", kind: str = "emploi"):
+@app.get("/api/jobs")
+async def search_jobs(q: str = "", location: str = "", department: str = "", kind: str = "emploi",
+                      uid: str = Depends(current_user)):
     if kind not in jobs.KINDS:
         raise HTTPException(status_code=400, detail="Unknown contract type.")
     result = {
@@ -360,7 +524,96 @@ async def search_jobs(q: str = "", location: str = "", department: str = "", kin
                 result["web_error"] = str(exc)
 
     await asyncio.gather(from_france_travail(), from_web())
+    analytics.capture(uid, "job_search", {"kind": kind, "results": len(result["offers"]) + len(result["web"]),
+                                          "web_ok": result["web_error"] is None})
     return result
+
+
+# ---------- Entreprises à démarcher (candidatures spontanées) ----------
+
+@app.post("/api/companies/search")
+async def search_companies(req: CompanySearchIn, uid: str = Depends(current_user)):
+    if not req.what.strip() or not req.where.strip():
+        raise HTTPException(status_code=400, detail="Say what you are looking for and where.")
+    started = time.monotonic()
+    labels = companies.naf_labels()
+    try:
+        center = await companies.geocode(req.where)
+        if req.activities:  # secteurs déjà choisis (page suivante, secteur retiré par la personne)
+            activities = [{"code": c, "label": labels[c]} for c in req.activities if c in labels][:companies.MAX_ACTIVITIES]
+        else:
+            activities = await companies.choose_activities(req.what)
+        if not activities:
+            raise companies.CompanySearchError("Choose at least one sector.")
+        found = await companies.search(center, activities, req.radius, max(0, req.minSize), max(1, req.page))
+    except companies.CompanySearchError as exc:
+        analytics.capture(uid, "company_search", {"ok": False, "ms": _ms(started), "error": "search"})
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except llm.LLMError as exc:
+        _ai_error(uid, "company_search", started, exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    analytics.capture(uid, "company_search", {"ok": True, "ms": _ms(started), "results": len(found["results"]),
+                                              "radius": req.radius, "page": req.page})
+    return {"center": center, "activities": activities, **found}
+
+
+@app.post("/api/companies/contact")
+async def company_contact(req: CompanyContactIn, uid: str = Depends(current_user)):
+    started = time.monotonic()
+    try:
+        contact = await companies.find_contact(req.name, req.city)
+    except companies.CompanySearchError as exc:
+        analytics.capture(uid, "company_contact", {"ok": False, "ms": _ms(started), "error": "search"})
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    analytics.capture(uid, "company_contact", {"ok": True, "ms": _ms(started), "website": bool(contact["website"]),
+                                               "emails": len(contact["emails"])})
+    return contact
+
+
+@app.post("/api/companies/application")
+async def spontaneous_application(req: SpontaneousIn, uid: str = Depends(current_user)):
+    started = time.monotonic()
+    company = {**req.company, "what": req.what, "description": req.description}
+    try:
+        email = await companies.write_application({}, company, req.lang)
+    except llm.LLMError as exc:
+        _ai_error(uid, "spontaneous_written", started, exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    analytics.capture(uid, "spontaneous_written", {"ok": True, "ms": _ms(started)})
+    return email
+
+
+# ---------- Statistiques d'usage ----------
+
+@app.post("/api/events", status_code=202)
+def collect_events(data: EventsIn, uid: str = Depends(current_user)):
+    """Événements envoyés par l'interface (pages vues, erreurs)."""
+    return {"stored": analytics.capture_many(uid, data.events, data.session)}
+
+
+@app.get("/api/stats")
+def usage_stats(days: int = 30, admin: bool = Depends(is_admin)):
+    if not admin:
+        raise HTTPException(status_code=403, detail="Statistics are reserved for administrators.")
+    # Comptes et candidatures depuis le début : calculés sur les données existantes, donc avec tout l'historique.
+    history = stats.evolution(store.list_account_dates(), store.list_application_dates(),
+                              datetime.now(timezone.utc).date())
+    return {**analytics.stats(days), "history": history}
+
+
+# ---------- Avis ----------
+
+@app.post("/api/reviews", status_code=201)
+def create_review(data: ReviewIn, claims: dict = Depends(_claims)):
+    store.create_review({**data.model_dump(), "uid": claims["sub"], "email": claims.get("email", ""),
+                         "createdAt": store.now()})
+
+
+@app.get("/api/reviews")
+def list_reviews(admin: bool = Depends(is_admin)):
+    if not admin:
+        raise HTTPException(status_code=403, detail="Administrators only.")
+    return sorted(store.list_reviews(), key=lambda r: r["createdAt"], reverse=True)
 
 
 # ---------- MCP (agents) ----------
