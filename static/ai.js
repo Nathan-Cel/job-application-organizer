@@ -169,7 +169,7 @@ function cvRow(cv, i) {
   return `<div class="fields">
       ${input("title", t("profile.cvTitle"), { value: cv.title, attrs: `required data-i="${i}"` })}
       <button class="icon-btn boxed" type="button" aria-label="${t("profile.removeCv")}" data-action="remove-cv" data-i="${i}">${icon("close", 16, 'stroke="currentColor" stroke-width="2"')}</button></div>
-    <div class="file-row">${icon("file", 22, 'stroke="#4B5563" stroke-width="1.5"')}
+    <div class="file-row">${icon("file", 22, 'stroke="currentColor" style="color:var(--muted)" stroke-width="1.5"')}
       <div><span class="file-name">${esc(f.name)}</span><span class="file-meta">${meta}</span></div>
       ${cv._pending ? "" : `<a class="btn" href="${fileUrl(cv.file)}" target="_blank" rel="noopener">${t("file.open")}</a>`}</div>`;
 }
@@ -185,13 +185,18 @@ function renderProfile() {
     <header class="stack"><h1>${t("nav.profile")}</h1><p class="lead">${t("profile.lead")}</p></header>
     <section class="mod"><div class="mod-head"><h2>${t("profile.cv")}</h2></div><div class="mod-body">
       ${cvs.map(cvRow).join('<div class="rule"></div>')}
-      <div class="drop">${icon("upload", 22, 'stroke="#4B5563" stroke-width="1.5"')}<span>${t("profile.addCv")}</span>
+      <div class="drop">${icon("upload", 22, 'stroke="currentColor" style="color:var(--muted)" stroke-width="1.5"')}<span>${t("profile.addCv")}</span>
         <input type="file" accept="application/pdf" hidden data-cv-file>
         <button class="btn" type="button" data-action="choose">${t("form.chooseFile")}</button></div>
     </div></section>
     <section class="mod"><div class="mod-head"><h2>${t("profile.language")}</h2></div><div class="mod-body">
       <div class="fields"><select class="field" data-lang-select aria-label="${t("profile.language")}">
         ${Object.keys(LOCALES).map((code) => `<option value="${code}" ${code === lang ? "selected" : ""}>${t("lang." + code)}</option>`).join("")}
+      </select></div>
+    </div></section>
+    <section class="mod"><div class="mod-head"><h2>${t("profile.theme")}</h2></div><div class="mod-body">
+      <div class="fields"><select class="field" data-theme-select aria-label="${t("profile.theme")}">
+        ${["auto", "light", "dark"].map((v) => `<option value="${v}" ${v === themePref() ? "selected" : ""}>${t("theme." + v)}</option>`).join("")}
       </select></div>
     </div></section>
     ${p.notice ? `<p class="banner success" role="status">${esc(p.notice)}</p>` : ""}
@@ -222,6 +227,11 @@ function renderProfile() {
     }
   };
   view.onchange = (e) => {
+    if (e.target.dataset.themeSelect !== undefined) {
+      setTheme(e.target.value);
+      track("theme_changed", { to: e.target.value });
+      return renderNav();
+    }
     if (e.target.dataset.langSelect !== undefined) {
       setLang(e.target.value);
       track("lang_changed", { to: e.target.value });

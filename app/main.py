@@ -238,14 +238,33 @@ def update_application(app_id: str, data: ApplicationIn, uid: str = Depends(curr
     if data.type != old["type"]:
         raise HTTPException(status_code=400, detail="The type of an application cannot change.")
     record = {k: v for k, v in old.items() if k != "id"} | data.model_dump()
-    if data.status != old["status"]:
-        record["lastStatusChangeAt"] = store.now()
-        if data.status != "notsent" and not old.get("sentAt"):
-            record["sentAt"] = record["lastStatusChangeAt"]
-        analytics.capture(uid, "status_changed", {"from": old["status"], "to": data.status, "source": "form"})
+    _status_change(record, old, uid, "form")
     saved = store.update_application(app_id, record)
     _delete_files(_file_ids(old["sections"]) - _file_ids(data.sections), uid)
     return saved
+
+
+def _status_change(record: dict, old: dict, uid: str, source: str) -> None:
+    """Date le changement de statut (et le premier envoi) de `record` par rapport à `old`."""
+    if record["status"] == old["status"]:
+        return
+    record["lastStatusChangeAt"] = store.now()
+    if record["status"] != "notsent" and not old.get("sentAt"):
+        record["sentAt"] = record["lastStatusChangeAt"]
+    analytics.capture(uid, "status_changed", {"from": old["status"], "to": record["status"], "source": source})
+
+
+class StatusIn(BaseModel):
+    status: Literal["notsent", "sent", "positive", "refused"]
+
+
+@app.patch("/api/applications/{app_id}/status")
+def update_status(app_id: str, data: StatusIn, uid: str = Depends(current_user)):
+    """Change seulement le statut (glisser-déposer du tableau Kanban)."""
+    old = get_application(app_id, uid)
+    record = {k: v for k, v in old.items() if k != "id"} | {"status": data.status}
+    _status_change(record, old, uid, "board")
+    return store.update_application(app_id, record)
 
 
 @app.delete("/api/applications/{app_id}", status_code=204)

@@ -4,23 +4,31 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Job search center</title>
+  <link rel="preload" href="/static/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/theme.js"></script>
 </head>
 <body>
   <div class="layout">
     <aside class="sidebar">
       <div class="brand"><div class="brand-logo"></div><span>Job search center</span></div>
+      <div id="quick"></div>
       <nav class="nav" id="nav"></nav>
-      <div class="lang" id="lang"></div>
+      <div class="side-foot">
+        <div id="theme"></div>
+        <div class="lang" id="lang"></div>
+      </div>
     </aside>
     <main id="view"></main>
   </div>
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
   <script src="/static/i18n.js"></script>
   <script src="/static/track.js"></script>
   <script src="/static/app.js"></script>
   <script src="/static/ai.js"></script>
   <script src="/static/stats.js"></script>
   <script src="/static/companies.js"></script>
+  <script src="/static/palette.js"></script>
   <script type="module" src="/static/auth.js"></script>
 </body>
 </html>

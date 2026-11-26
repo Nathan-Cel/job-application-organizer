@@ -30,8 +30,13 @@ const ICONS = {
   expand: '<path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/>',
   spark: '<path d="M12 3v5M12 16v5M3 12h5M16 12h5M6 6l3 3M15 15l3 3M18 6l-3 3M9 15l-3 3"/>',
   link: '<path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1"/><path d="M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1"/>',
+  moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  board: '<path d="M3 4h5v16H3zM10 4h5v10h-5zM17 4h4v13h-4z"/>',
+  arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
 };
-const GRIP = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="#9CA3AF">'
+const GRIP = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color:var(--dashed)">'
   + [6, 12, 18].map((y) => `<circle cx="9" cy="${y}" r="1.6"/><circle cx="15" cy="${y}" r="1.6"/>`).join("") + "</svg>";
 
 let userId; // undefined tant que Firebase n'a pas répondu, null si déconnecté
@@ -65,6 +70,17 @@ async function api(path, options = {}) {
     throw Object.assign(new Error(data.detail || `Error ${resp.status}`), { status: resp.status });
   }
   return data;
+}
+
+// Petite notification en bas de l'écran, qui disparaît seule.
+function toast(text, kind = "success") {
+  const el = document.getElementById("toasts").appendChild(document.createElement("div"));
+  el.className = `toast ${kind}`;
+  el.textContent = text;
+  setTimeout(() => {
+    el.classList.add("leaving");
+    setTimeout(() => el.remove(), 220);
+  }, 3200);
 }
 
 function fmtDate(iso) {
@@ -131,10 +147,29 @@ function renderNav() {
     ${me?.admin
       ? `<a href="#/stats"${current(page === "stats")}>${icon("chart", 18)}<span>${t("nav.stats")}</span></a>`
       : `<a href="#/review"${current(page === "review")}>${icon("star", 18)}<span>${t("nav.review")}</span></a>`}` : "";
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+  document.getElementById("quick").innerHTML = userId
+    ? `<button class="quick" type="button" data-palette>${icon("search", 15)}<span class="grow">${t("palette.open")}</span><kbd>${mac ? "⌘" : "Ctrl"}</kbd><kbd>K</kbd></button>`
+    : "";
+  const dark = document.documentElement.dataset.theme === "dark";
+  document.getElementById("theme").innerHTML = `<button class="theme-btn" type="button" data-theme-toggle aria-pressed="${dark}">${icon(dark ? "sun" : "moon", 16)}<span class="label">${t(dark ? "theme.light" : "theme.dark")}</span></button>`;
   // Connecté, la langue se choisit dans le profil.
   document.getElementById("lang").innerHTML = userId ? "" : Object.keys(LOCALES)
     .map((code) => `<button type="button" data-lang="${code}" aria-pressed="${code === lang}">${code.toUpperCase()}</button>`)
     .join("");
+}
+
+document.querySelector(".sidebar").addEventListener("click", (e) => {
+  if (e.target.closest("[data-palette]")) openPalette();
+  if (e.target.closest("[data-theme-toggle]")) toggleTheme();
+});
+
+// Revenir au thème du navigateur remet le réglage sur « auto » : l'appli suit alors de nouveau ses changements.
+function toggleTheme() {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  setTheme(next === (themeQuery.matches ? "dark" : "light") ? "auto" : next);
+  renderNav();
+  rerender();
 }
 
 document.getElementById("lang").onclick = (e) => {
@@ -150,6 +185,7 @@ function route() {
   const [, page, id, sub] = location.hash.split("/");
   view.className = "";
   view.onclick = view.oninput = view.onchange = view.onsubmit = null;
+  view.ondragstart = view.ondragend = view.ondragover = view.ondragleave = view.ondrop = null;
   if (page !== "new" && sub !== "edit") form = null;
   renderNav();
   if (!userId) return showLogin();
@@ -176,7 +212,26 @@ window.onhashchange = route;
 
 // ---------- Box ----------
 
+const BOX_VIEWS = ["date", "company", "board"];
+const FOLLOW_UP_DAYS = 14;
 const box = { filter: "all", menuOpen: false, query: "", ioOpen: false, view: "date", closed: new Set(), notice: null };
+try {
+  if (BOX_VIEWS.includes(localStorage.getItem("boxView"))) box.view = localStorage.getItem("boxView");
+} catch {}
+
+// Envoyée depuis au moins 14 jours, sans réponse ni prochaine étape : à relancer.
+function needsFollowUp(a) {
+  if (a.status !== "sent" || a.nextStep?.date) return false;
+  return Date.now() - new Date(a.lastStatusChangeAt).getTime() >= FOLLOW_UP_DAYS * 864e5;
+}
+
+function followUpTag(a) {
+  return needsFollowUp(a) ? `<span class="followup-tag">${t("followup.tag")}</span>` : "";
+}
+
+function daysAgo(iso) {
+  return Math.floor((Date.now() - new Date(iso).getTime()) / 864e5);
+}
 
 async function showBox() {
   view.className = "list";
@@ -193,22 +248,37 @@ async function showBox() {
 
 function renderBox() {
   const query = box.query.trim().toLowerCase();
-  const shown = apps.filter((a) => (box.filter === "all" || a.status === box.filter)
+  const keep = (a) => box.filter === "all" || a.status === box.filter || (box.filter === "followup" && needsFollowUp(a));
+  const shown = apps.filter((a) => (box.view === "board" || keep(a))
     && `${a.company} ${a.jobTitle ?? ""}`.toLowerCase().includes(query));
+  const late = apps.filter(needsFollowUp);
   const filters = ["all", ...STATUSES].map((key) => {
     const count = key === "all" ? apps.length : apps.filter((a) => a.status === key).length;
     const label = key === "all" ? t("filter.all") : t("status." + key);
     return `<button type="button" data-filter="${key}" aria-pressed="${box.filter === key}">
       <span class="mark" aria-hidden="true"></span><span class="grow">${label}</span><span class="count">${count}</span></button>`;
-  }).join("");
-  const rows = box.view === "date" ? shown.map(appRow).join("") : groupByCompany(shown).map((g) => {
+  }).join("") + `<button type="button" data-filter="followup" aria-pressed="${box.filter === "followup"}">
+      <span class="mark" aria-hidden="true"></span><span class="grow">${t("followup.filter")}</span><span class="count">${apps.filter(needsFollowUp).length}</span></button>`;
+  const rows = !appsLoaded ? skeletonRows() : box.view !== "company" ? shown.map(appRow).join("") : groupByCompany(shown).map((g) => {
     const open = !box.closed.has(g.key);
     return `<button class="row group" type="button" data-group="${esc(g.key)}" aria-expanded="${open}">
         ${icon("chevron", 16, 'stroke="currentColor" stroke-width="2"')}<strong class="grow">${esc(g.name)}</strong><span class="count">${g.apps.length}</span>
       </button>${open ? g.apps.map(appRow).join("") : ""}`;
   }).join("");
-  const views = ["date", "company"].map((v) =>
-    `<button class="btn" type="button" data-view="${v}" aria-pressed="${box.view === v}">${t("box.by." + v)}</button>`).join("");
+  const views = BOX_VIEWS.map((v) =>
+    `<button class="btn" type="button" data-view="${v}" aria-pressed="${box.view === v}">${v === "board" ? icon("board", 15) : ""}${t("box.by." + v)}</button>`).join("");
+  const filterLabel = box.filter === "all" ? t("filter.label")
+    : t("filter.active", { status: box.filter === "followup" ? t("followup.filter") : t("status." + box.filter) });
+  const followUp = late.length && box.filter !== "followup" && box.view !== "board"
+    ? `<div class="banner followup" role="status"><span class="grow">${t(late.length === 1 ? "followup.one" : "followup.many", { n: late.length, days: FOLLOW_UP_DAYS })}</span>
+        <button class="btn" type="button" data-filter="followup">${t("followup.show")}</button></div>` : "";
+  const list = box.view === "board" ? board(shown) : `
+    <section class="table" aria-label="${t("box.applications")}">
+      <div class="table-inner">
+        <div class="row head"><div class="col-main">${t("box.colMain")}</div><div class="col-status">${t("box.colStatus")}</div><div class="col-date">${t("box.colDate")}</div></div>
+        ${rows || `<div class="row"><p class="meta">${t("box.empty")}</p></div>`}
+      </div>
+    </section>`;
 
   view.innerHTML = `
     <header class="page-head">
@@ -227,8 +297,8 @@ function renderBox() {
           </div>` : ""}
         </div>
         <div class="menu-wrap">
-          <button class="btn" type="button" id="filter-btn" aria-haspopup="true" aria-expanded="${box.menuOpen}">
-            ${icon("filter")}<span>${box.filter === "all" ? t("filter.label") : t("filter.active", { status: t("status." + box.filter) })}</span>${icon("chevron", 14, 'stroke="currentColor" stroke-width="2"')}
+          <button class="btn" type="button" id="filter-btn" aria-haspopup="true" aria-expanded="${box.menuOpen}" ${box.view === "board" ? "disabled" : ""}>
+            ${icon("filter")}<span>${filterLabel}</span>${icon("chevron", 14, 'stroke="currentColor" stroke-width="2"')}
           </button>
           ${box.menuOpen ? `<div class="menu" role="group" aria-label="${t("filter.group")}">${filters}</div>` : ""}
         </div>
@@ -236,12 +306,8 @@ function renderBox() {
       </div>
     </header>
     ${box.notice ? `<p class="banner ${box.notice.cls}" role="status">${esc(box.notice.text)}</p>` : ""}
-    <section class="table" aria-label="${t("box.applications")}">
-      <div class="table-inner">
-        <div class="row head"><div class="col-main">${t("box.colMain")}</div><div class="col-status">${t("box.colStatus")}</div><div class="col-date">${t("box.colDate")}</div></div>
-        ${rows || (appsLoaded ? `<div class="row"><p class="meta">${t("box.empty")}</p></div>` : "")}
-      </div>
-    </section>`;
+    ${followUp}
+    ${list}`;
 
   view.onclick = (e) => {
     if (e.target.closest("#filter-btn")) {
@@ -260,6 +326,10 @@ function renderBox() {
     const pickView = e.target.closest("[data-view]");
     if (pickView) {
       box.view = pickView.dataset.view;
+      try {
+        localStorage.setItem("boxView", box.view);
+      } catch {}
+      track("box_view", { view: box.view });
       renderBox();
     }
     const group = e.target.closest("[data-group]");
@@ -283,6 +353,87 @@ function renderBox() {
   view.onchange = (e) => {
     if (e.target.dataset.import !== undefined) importFile(e.target.files[0]);
   };
+  if (box.view === "board") bindBoard();
+}
+
+function skeletonRows() {
+  return [68, 52, 74, 46, 60].map((w) => `<div class="row" aria-hidden="true">
+      <div class="col-main"><span class="skeleton logo-sk"></span><span class="skeleton" style="width:${w}%"></span></div>
+      <div class="col-status"><span class="skeleton" style="width:90px"></span></div>
+      <div class="col-date"><span class="skeleton" style="width:56px;margin-left:auto"></span></div></div>`).join("");
+}
+
+// ---------- Box : tableau Kanban (une colonne par statut, glisser-déposer) ----------
+
+function board(list) {
+  const cols = STATUSES.map((status) => {
+    const cards = list.filter((a) => a.status === status);
+    return `<section class="col col-${status}" data-col="${status}" aria-label="${t("status." + status)}">
+      <div class="col-head"><span class="dot" aria-hidden="true"></span>${t("status." + status)}<span class="count">${cards.length}</span></div>
+      <div class="col-body">${cards.map(boardCard).join("") || `<p class="col-empty">${t(appsLoaded ? "board.empty" : "board.loading")}</p>`}</div>
+    </section>`;
+  }).join("");
+  return `<p class="board-hint">${t("board.hint")}</p><div class="board">${cols}</div>`;
+}
+
+function boardCard(a) {
+  const title = a.jobTitle || (a.type === "spontaneous" ? t("type.spontaneous") : "");
+  return `<a class="board-card" href="#/a/${a.id}" draggable="true" data-card="${a.id}">
+      <div class="top">${logo(a.company)}<strong>${esc(a.company)}</strong></div>
+      ${title ? `<div class="title">${esc(title)}</div>` : ""}
+      <div class="foot">${nextStepTag(a)}${followUpTag(a)}<span class="date">${fmtDate(a.lastStatusChangeAt)}</span></div>
+    </a>`;
+}
+
+function bindBoard() {
+  let dragged = null;
+  view.ondragstart = (e) => {
+    const cardEl = e.target.closest("[data-card]");
+    if (!cardEl) return;
+    dragged = cardEl.dataset.card;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", dragged);
+    requestAnimationFrame(() => cardEl.classList.add("dragging"));
+  };
+  view.ondragend = (e) => {
+    e.target.closest("[data-card]")?.classList.remove("dragging");
+    view.querySelectorAll(".col.over").forEach((c) => c.classList.remove("over"));
+  };
+  view.ondragover = (e) => {
+    const col = e.target.closest("[data-col]");
+    if (!col || !dragged) return;
+    e.preventDefault();
+    view.querySelectorAll(".col.over").forEach((c) => c !== col && c.classList.remove("over"));
+    col.classList.add("over");
+  };
+  view.ondragleave = (e) => {
+    const col = e.target.closest("[data-col]");
+    if (col && !col.contains(e.relatedTarget)) col.classList.remove("over");
+  };
+  view.ondrop = (e) => {
+    const col = e.target.closest("[data-col]");
+    if (!col || !dragged) return;
+    e.preventDefault();
+    moveTo(dragged, col.dataset.col);
+    dragged = null;
+  };
+}
+
+// Change le statut tout de suite à l'écran, puis l'enregistre ; revient en arrière en cas d'erreur.
+async function moveTo(id, status) {
+  const a = apps.find((x) => x.id === id);
+  if (!a || a.status === status) return renderBox();
+  const before = { status: a.status, lastStatusChangeAt: a.lastStatusChangeAt };
+  Object.assign(a, { status, lastStatusChangeAt: new Date().toISOString() });
+  renderBox();
+  try {
+    Object.assign(a, await api(`/api/applications/${id}/status`, { method: "PATCH", body: { status } }));
+    toast(t("board.moved", { company: a.company, status: t("status." + status) }));
+  } catch (err) {
+    Object.assign(a, before);
+    toast(err.message, "error");
+  }
+  renderBox();
 }
 
 function appRow(a) {
@@ -290,7 +441,7 @@ function appRow(a) {
     <div class="row">
       <div class="col-main">${logo(a.company)}
         <a class="row-link" href="#/a/${a.id}"><strong>${esc(a.company)}</strong><span>${esc(a.jobTitle || (a.type === "spontaneous" ? t("type.spontaneous") : ""))}</span></a>
-        ${nextStepTag(a)}
+        ${nextStepTag(a)}${followUpTag(a)}
       </div>
       <div class="col-status">${statusTag(a.status)}</div>
       <div class="col-date">${fmtDate(a.lastStatusChangeAt)}</div>
@@ -314,7 +465,7 @@ async function importFile(file) {
   box.ioOpen = false;
   try {
     const r = await api(`/api/import/${fmt}`, { method: "POST", body: file });
-    box.notice = { cls: "success", text: t("io.imported", { n: r.imported }) };
+    toast(t("io.imported", { n: r.imported }));
     await loadApps();
   } catch (err) {
     box.notice = { cls: "error", text: err.message };
@@ -565,8 +716,8 @@ function renderTypeStep() {
     ${backLink("#/", t("back.box"))}
     <h1>${t("form.newTitle")}</h1>
     <div class="type-cards">
-      <button class="btn type-card" type="button" data-type="regular">${icon("fileCheck", 28, 'stroke="#166534" stroke-width="1.5"')}${t("type.regular")}</button>
-      <button class="btn type-card" type="button" data-type="spontaneous">${icon("mail", 28, 'stroke="#166534" stroke-width="1.5"')}${t("type.spontaneous")}</button>
+      <button class="btn type-card" type="button" data-type="regular">${icon("fileCheck", 28, 'stroke="currentColor" style="color:var(--accent-text)" stroke-width="1.5"')}${t("type.regular")}</button>
+      <button class="btn type-card" type="button" data-type="spontaneous">${icon("mail", 28, 'stroke="currentColor" style="color:var(--accent-text)" stroke-width="1.5"')}${t("type.spontaneous")}</button>
     </div></div>`;
   view.onclick = (e) => {
     const pick = e.target.closest("[data-type]");
@@ -608,11 +759,11 @@ function dropZone(s, textKey) {
   const file = s._pending ? { name: s._pending.name } : s.file;
   if (file) {
     const meta = s._pending ? t("form.fileReady") : `${pagesLabel(file.pages)} · ${t("file.added", { date: fmtDate(file.addedAt) })}`;
-    return `<div class="file-row">${icon("file", 22, 'stroke="#4B5563" stroke-width="1.5"')}
+    return `<div class="file-row">${icon("file", 22, 'stroke="currentColor" style="color:var(--muted)" stroke-width="1.5"')}
       <div><span class="file-name">${esc(file.name)}</span><span class="file-meta">${meta}</span></div>
       ${chooser(s, "form.replaceFile")}</div>`;
   }
-  return `<div class="drop" data-drop="${s.id}">${icon("upload", 22, 'stroke="#4B5563" stroke-width="1.5"')}
+  return `<div class="drop" data-drop="${s.id}">${icon("upload", 22, 'stroke="currentColor" style="color:var(--muted)" stroke-width="1.5"')}
     <span>${t(textKey)}</span>
     ${chooser(s, "form.chooseFile")}</div>`;
 }
@@ -944,6 +1095,7 @@ async function saveForm() {
       ? await api(`/api/applications/${f.id}`, { method: "PUT", body })
       : await api("/api/applications", { method: "POST", body });
     form = null;
+    toast(t(f.id ? "toast.updated" : "toast.created", { company: saved.company }));
     location.hash = `#/a/${saved.id}`;
     loadApps().catch(() => {});
   } catch (err) {
@@ -956,6 +1108,7 @@ async function deleteApplication() {
   if (!confirm(t("form.confirmDelete"))) return;
   try {
     await api(`/api/applications/${form.id}`, { method: "DELETE" });
+    toast(t("toast.deleted", { company: form.company }));
     form = null;
     location.hash = "#/";
   } catch (err) {
@@ -986,6 +1139,7 @@ async function showAgent() {
       if (e.target.id !== "copy-link") return;
       await navigator.clipboard.writeText(location.origin + path);
       e.target.textContent = t("agent.copied");
+      toast(t("agent.copied"));
     };
   } catch (err) {
     view.innerHTML += `<p class="banner error" role="status">${esc(err.message)}</p>`;
@@ -1184,3 +1338,4 @@ function showLogin() {
     }
   };
 }
+themeQuery.addEventListener("change", () => renderNav());

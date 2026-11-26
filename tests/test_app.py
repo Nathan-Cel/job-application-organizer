@@ -280,3 +280,12 @@ def test_delete_account(client, monkeypatch):
     monkeypatch.setattr(store, "delete_user", deleted.append)
     assert client.delete("/api/account").status_code == 204
     assert deleted == ["u1"]
+
+
+def test_status_patch(client):
+    app_id = _new(client, sections=[{"id": "s1", "kind": "contact", "name": "Maya", "extra": []}]).json()["id"]
+    moved = client.patch(f"/api/applications/{app_id}/status", json={"status": "sent"}).json()
+    assert moved["status"] == "sent" and moved["sentAt"] == moved["lastStatusChangeAt"]
+    assert moved["sections"][0]["name"] == "Maya"  # le reste de la candidature ne bouge pas
+    assert client.patch(f"/api/applications/{app_id}/status", json={"status": "x"}).status_code == 422
+    assert client.patch("/api/applications/nope/status", json={"status": "sent"}).status_code == 404
