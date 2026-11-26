@@ -6,7 +6,9 @@
 - Le compte de démo est administrateur : la page Statistiques est visible.
 
 Lancement, depuis le dossier du projet :  python scripts/demo.py
-puis ouvrir http://localhost:8000. Ne jamais utiliser ce mode pour un déploiement.
+puis ouvrir http://localhost:8000.
+Sur un téléphone du même Wi-Fi :  HOST=0.0.0.0 python scripts/demo.py, puis http://<IP de l'ordinateur>:8000.
+Ne jamais utiliser ce mode pour un déploiement.
 """
 
 import os
@@ -85,5 +87,10 @@ if __name__ == "__main__":
     main.app.router.routes.insert(0, Route("/static/auth.js", auth_stub))
     if not os.getenv("GROQ_API_KEY"):
         print("Attention : GROQ_API_KEY manque dans .env, les fonctions IA ne marcheront pas.")
+    # HOST=0.0.0.0 rend la démo visible des autres appareils du même Wi-Fi (pour l'essayer sur un téléphone).
+    # Sans connexion à protéger, ne le faire que sur un réseau de confiance.
+    host = os.getenv("HOST", "127.0.0.1")
+    if host != "127.0.0.1":
+        print("Attention : la démo est ouverte à tout le réseau local, sans mot de passe.")
     print("Mode démo : ouvre http://localhost:8000 (Ctrl + C pour arrêter, les données sont alors effacées).")
-    uvicorn.run(main.app, host="127.0.0.1", port=int(os.getenv("PORT", "8000")), log_level="warning")
+    uvicorn.run(main.app, host=host, port=int(os.getenv("PORT", "8000")), log_level="warning")
