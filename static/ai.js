@@ -120,12 +120,24 @@ function offerText(f) {
   return (link.paste || link.rawText || [f.jobTitle, kp.contract, kp.responsibilities, kp.requirements].filter(Boolean).join("\n")).trim();
 }
 
+// E-mail de candidature spontanée : infos de la section Entreprise, CV de la section CV comme contexte.
+async function coldEmail(f) {
+  const cv = section(f, "cv") || {};
+  const { subject, body } = await api("/api/companies/application", {
+    method: "POST",
+    body: { company: { name: f.company }, what: f.jobTitle, description: section(f, "company")?.summary || "",
+      cvFileId: cv.file?.id || cv._profileFileId || "", lang },
+  });
+  return `${subject}\n\n${body}`;
+}
+
 async function suggestLetter(s) {
   if (s.text.trim() && !confirm(t("suggest.confirmReplace"))) return;
   Object.assign(s, { _ai: "loading", _aiError: "" });
   renderForm();
   try {
-    s.text = (await api("/api/write", { method: "POST", body: { kind: "letter", offer: offerText(form), company: form.company, lang } })).text;
+    s.text = form.type === "spontaneous" ? await coldEmail(form)
+      : (await api("/api/write", { method: "POST", body: { kind: "letter", offer: offerText(form), company: form.company, lang } })).text;
     s._ai = "";
   } catch (err) {
     Object.assign(s, { _ai: "error", _aiError: err.message });
@@ -242,6 +254,7 @@ function renderProfile() {
       }
       p.data = await api("/api/profile", { method: "PUT", body: { cvs } });
       p.notice = t("profile.saved");
+      profileCvs = p.data.cvs;
     } catch (err) {
       p.error = err.message;
     }
