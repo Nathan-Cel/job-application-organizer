@@ -92,12 +92,14 @@ class CompanySearchIn(BaseModel):
 class CompanyContactIn(BaseModel):
     name: str
     city: str = ""
+    website: str = ""  # déjà trouvé : évite une nouvelle recherche
 
 
 class SpontaneousIn(BaseModel):
     company: dict
     what: str = ""
     description: str = ""
+    cvFileId: str = ""  # CV du profil donné à l'IA comme contexte
     lang: Lang = "fr"
 
 
@@ -289,7 +291,11 @@ async def recruiter_reply(req: ReplyRequest, uid: str = Depends(current_user)):
 
 def _cv_for(record: dict, uid: str) -> str:
     """Texte du CV envoyé pour cette candidature (PDF de la section CV), vide s'il n'y en a pas."""
-    file_id = (replies.section(record, "cv").get("file") or {}).get("id")
+    return _cv_text((replies.section(record, "cv").get("file") or {}).get("id"), uid)
+
+
+def _cv_text(file_id: str | None, uid: str) -> str:
+    """Texte d'un CV en PDF de l'utilisateur, vide s'il est introuvable ou illisible."""
     found = store.get_file(file_id) if file_id else None
     if found and found[0].get("uid") == uid:
         try:
@@ -562,11 +568,23 @@ async def search_companies(req: CompanySearchIn, uid: str = Depends(current_user
     return {"center": center, "activities": activities, **found}
 
 
+@app.post("/api/companies/website")
+async def company_website(req: CompanyContactIn, uid: str = Depends(current_user)):
+    started = time.monotonic()
+    try:
+        website = await companies.find_website(req.name, req.city)
+    except companies.CompanySearchError as exc:
+        analytics.capture(uid, "company_website", {"ok": False, "ms": _ms(started), "error": "search"})
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    analytics.capture(uid, "company_website", {"ok": True, "ms": _ms(started), "found": bool(website)})
+    return {"website": website}
+
+
 @app.post("/api/companies/contact")
 async def company_contact(req: CompanyContactIn, uid: str = Depends(current_user)):
     started = time.monotonic()
     try:
-        contact = await companies.find_contact(req.name, req.city)
+        contact = await companies.find_contact(req.name, req.city, req.website)
     except companies.CompanySearchError as exc:
         analytics.capture(uid, "company_contact", {"ok": False, "ms": _ms(started), "error": "search"})
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -580,11 +598,11 @@ async def spontaneous_application(req: SpontaneousIn, uid: str = Depends(current
     started = time.monotonic()
     company = {**req.company, "what": req.what, "description": req.description}
     try:
-        email = await companies.write_application({}, company, req.lang)
+        email = await companies.write_application({"cv": _cv_text(req.cvFileId, uid)}, company, req.lang)
     except llm.LLMError as exc:
         _ai_error(uid, "spontaneous_written", started, exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    analytics.capture(uid, "spontaneous_written", {"ok": True, "ms": _ms(started)})
+    analytics.capture(uid, "spontaneous_written", {"ok": True, "ms": _ms(started), "cv": bool(req.cvFileId)})
     return email
 
 

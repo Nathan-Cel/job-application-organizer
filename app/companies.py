@@ -301,9 +301,8 @@ def rank_emails(emails: set[str], domain: str) -> list[dict]:
     return ranked[:8]
 
 
-async def find_contact(name: str, city: str) -> dict:
-    """Site officiel, e-mails publiés et page carrières d'une entreprise."""
-    website = ""
+async def find_website(name: str, city: str) -> str:
+    """Site officiel d'une entreprise, vide s'il n'est pas trouvé."""
     for query in (f"{name} {city}", f"{name} site web entreprise"):  # seconde formulation si la première échoue
         try:
             results = await websearch.search(query, max_results=8)
@@ -311,7 +310,13 @@ async def find_contact(name: str, city: str) -> dict:
             raise CompanySearchError(str(exc)) from exc
         website = pick_website(results, name)
         if website:
-            break
+            return website
+    return ""
+
+
+async def find_contact(name: str, city: str, website: str = "") -> dict:
+    """E-mails publiés et page carrières d'une entreprise, sur son site (cherché s'il n'est pas donné)."""
+    website = website or await find_website(name, city)
     if not website:
         return {"website": "", "emails": [], "careersUrl": "", "description": "", "pages": 0}
     domain = _domain(website)
