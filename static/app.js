@@ -163,8 +163,10 @@ document.querySelector(".sidebar").addEventListener("click", (e) => {
   if (e.target.closest("[data-theme-toggle]")) toggleTheme();
 });
 
+// Revenir au thème du navigateur remet le réglage sur « auto » : l'appli suit alors de nouveau ses changements.
 function toggleTheme() {
-  setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  setTheme(next === (themeQuery.matches ? "dark" : "light") ? "auto" : next);
   renderNav();
   rerender();
 }
