@@ -108,14 +108,14 @@ gcloud secrets add-iam-policy-binding mcp-secret --role=roles/secretmanager.secr
 
 # À chaque mise à jour
 gcloud run deploy job-search-center --source . --region europe-west1 --allow-unauthenticated \
-  --set-env-vars FIREBASE_PROJECT_ID=helper-job-search-center,ADMIN_EMAILS=nathan.celerier@aivancity.education \
+  --set-env-vars "^;^FIREBASE_PROJECT_ID=helper-job-search-center;ADMIN_EMAILS=nathan.celerier@aivancity.education,astreonoobie@gmail.com,aminadll26@outlook.com" \
   --set-secrets GROQ_API_KEY=groq-api-key:latest,MCP_SECRET=mcp-secret:latest
 firebase deploy --only hosting
 ```
 
 Pour France Travail, ajoute `FRANCE_TRAVAIL_CLIENT_ID` et `FRANCE_TRAVAIL_CLIENT_SECRET` de la même façon. Pour PostHog, ajoute sa clé en secret si tu l'utilises (`--set-secrets POSTHOG_API_KEY=posthog-api-key:latest`).
 
-Garde `ADMIN_EMAILS` dans `--set-env-vars`, qui remplace toutes les variables du service à chaque déploiement : sans lui, plus personne n'accède à la page Statistics.
+Garde `ADMIN_EMAILS` dans `--set-env-vars`, qui remplace toutes les variables du service à chaque déploiement : sans lui, plus personne n'accède à la page Statistics. Le préfixe `^;^` sépare les variables par `;`, car les e-mails sont séparés par des virgules.
 
 ## Tests
 
