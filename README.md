@@ -72,7 +72,7 @@ La recherche d'offres, l'assistant et la préparation d'entretien cherchent sur 
 1. Crée un compte sur https://app.tavily.com (gratuit jusqu'à 1 000 recherches par mois, sans carte bancaire).
 2. Copie la clé (elle commence par `tvly-`) dans `.env` : `TAVILY_API_KEY=...`, puis redémarre l'appli.
 
-Si Tavily échoue (quota atteint…), DuckDuckGo prend le relais. En production : `printf %s "<clé>" | gcloud secrets create tavily-api-key --data-file=-`, puis ajoute `TAVILY_API_KEY=tavily-api-key:latest` à `--set-secrets`.
+Si Tavily échoue (quota atteint…), DuckDuckGo prend le relais. En production : `printf %s "<clé>" | gcloud secrets create tavily-api-key --data-file=-` (la commande de déploiement la lit déjà).
 ### Agents IA (MCP)
 
 Le lien de chaque utilisateur est son identifiant signé avec `MCP_SECRET` : il sert de mot de passe. Génère une valeur avec `python -c "import secrets; print(secrets.token_hex(32))"` et mets-la dans `.env` : `MCP_SECRET=...`. Changer ce secret invalide tous les liens.
@@ -110,7 +110,7 @@ gcloud secrets add-iam-policy-binding mcp-secret --role=roles/secretmanager.secr
 # À chaque mise à jour
 gcloud run deploy job-search-center --source . --region europe-west1 --allow-unauthenticated \
   --set-env-vars "^;^FIREBASE_PROJECT_ID=helper-job-search-center;ADMIN_EMAILS=nathan.celerier@aivancity.education,astreonoobie@gmail.com,aminadll26@outlook.com" \
-  --set-secrets GROQ_API_KEY=groq-api-key:latest,MCP_SECRET=mcp-secret:latest
+  --set-secrets GROQ_API_KEY=groq-api-key:latest,MCP_SECRET=mcp-secret:latest,TAVILY_API_KEY=tavily-api-key:latest
 firebase deploy --only hosting
 ```
 
